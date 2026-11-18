@@ -7,7 +7,7 @@ Masaüstü robot asistanı **Kairon**'un ESP32-S3 mikrokontrolcüsü üzerinde �
 ## 🔒 Güvenlik ve Gizlilik Uyarısı
 > **ÖNEMLİ:** Bu klasördeki bulut bağlantıları, yapay zeka istemleri, DSP ses sürücüleri ve özellikle `secrets.h` (WiFi, Groq, Gemini ve Supabase anahtarları) güvenlik ve fikri mülkiyet gereği `.gitignore` ile korunmaktadır ve **asla GitHub'a gönderilmez.**
 >
-> Açık kaynaklı repoda yalnızca donanım pin/konfigürasyon tanımları (`Config.h`), seri komut arabirimi (`Console.h`) ve ana döngü taslağı (`sketch_oct30a.ino`) yer alır.
+> Açık kaynaklı repoda yalnızca donanım pin/konfigürasyon tanımları (`Config.h`), seri ve uzaktan konsol motoru (`Console.h`) ve ana döngü taslağı (`sketch_oct30a.ino`) yer alır.
 
 ---
 
@@ -39,11 +39,19 @@ Masaüstü robot asistanı **Kairon**'un ESP32-S3 mikrokontrolcüsü üzerinde �
 
 ---
 
-## 💻 Seri Monitör Komutları (115200 Baud)
-- `/sonar` : Ultrasonik sensör mesafe ölçüm değerlerini döker.
-- `/brain` : LLM ve konuşma durumunu gösterir.
-- `/pc <cümle>` : Bilgisayar ajanına imzalı görev komutu gönderir (Test).
-- `/pcstat` : PC ajanının canlılık (heartbeat) ve son durum bilgisini sorgular.
-- `/say <metin>` : Google TTS motoru üzerinden robota yerel konuşma yaptırır.
-- `/kafa <pan> <tilt>` : Servoları doğrudan hedef açılara hareket ettirir.
-- `/screen` : Ekran ve göz animasyonu modunu test eder.
+## 💻 Merkezi Konsol Komutları (`Console.h`)
+Komutlar hem USB Seri Monitör üzerinden (115200 Baud) hem de Kairon Mobile uygulamasındaki **Kairon IDE Test Konsolu** üzerinden veritabanını şişirmeden geçici bellekte çalıştırılabilir:
+
+- `/sonar` : Ultrasonik sensör mesafe ölçüm değerlerini ve kullanıcı algılama durumunu döker.
+- `/sonar test` : Sensör self-test prosedürünü çalıştırır.
+- `/brain` : LLM karar motoru, bellek durumu ve konuşma geçmişini gösterir.
+- `/mem` : Bulut ve yerel RAM hafızasında kayıtlı anıları listeler.
+- `/days` : Kayıtlı özel günleri ve periyodik hatırlatıcıları döker.
+- `/time` : Robotun donanım sistem saatini verir.
+- `/kafa <evet|hayir|uyu|sol|sag>` : Servoları doğrudan önceden tanımlanmış jest pozisyonuna hareket ettirir.
+- `/say <metin>` : TTS motoru üzerinden robota yerel konuşma yaptırır (Hoparlör testi).
+- `/style <komik|ciddi|zeki|soguk|sevimli|otomatik>` : Karakter ve konuşma tarzını ayarlar.
+- `/vol <0.0 - 1.0>` : Hoparlör çıkış ses seviyesini ayarlar.
+- `/qr` / `/pair` : ST7789 ekranında eşleştirme QR matrisini ve 6 haneli PIN kodunu açar / kapatır.
+- `/owner` : Cihaza bağlı sahip kullanıcının UUID kimliğini doğrular.
+- `/restart` : ESP32 mikrokontrolcüsünü yazılımsal olarak yeniden başlatır.

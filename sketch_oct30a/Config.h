@@ -95,6 +95,11 @@ const char* SYSTEM_PROMPT_BASE =
 // ---- IoT ve Mod Degiskenleri ----
 bool powerOn = true;
 int activeMode = 0;        // 0: Normal, 1: Calisma, 2: Uyku, 3: Disarida
+String activeModesStr = "normal"; // Coklu mod: "normal,office", "office,focus", vb.
+inline bool isModeActive(const char* m) {
+  if (!m || !m[0]) return false;
+  return activeModesStr.indexOf(m) >= 0;
+}
 int faceStyle = 0;
 String robotOwnerId = "";        // Supabase owner_id (Kullanici UUID)
 String robotPairingPin = "";     // 6 haneli QR / Eslestirme PIN'i
@@ -103,6 +108,9 @@ TaskHandle_t faceHandle = nullptr;
 TaskHandle_t servoHandle = nullptr;
 char appSayBuf[320];                   // Flutter'dan gelen "bunu soyle" (core0 yazar, core1 okur)
 volatile bool appSayReady = false;
+
+// Ileri bildirim (Forward declaration)
+String runConsoleCommand(String s);
 
 // ---- Mikrofon ayarlari ----
 const unsigned long SLEEP_AFTER_MS = 5UL * 60UL * 1000UL;

@@ -9,6 +9,7 @@ import 'services/supabase_service.dart';
 import 'features/auth/login_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/modes/modes_screen.dart';
+import 'features/reminders/reminders_screen.dart';
 import 'features/telemetry/telemetry_screen.dart';
 import 'features/office_inbox/inbox_screen.dart';
 import 'features/settings/settings_screen.dart';
@@ -72,6 +73,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   final List<Widget> _screens = const [
     DashboardScreen(),
     ModesScreen(),
+    RemindersScreen(),
     TelemetryScreen(),
     InboxScreen(),
     SettingsScreen(),
@@ -99,6 +101,11 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             icon: Icon(Icons.tune_outlined),
             selectedIcon: Icon(Icons.tune, color: Color(0xFF00E5FF)),
             label: 'Modlar',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.alarm_outlined),
+            selectedIcon: Icon(Icons.alarm, color: Color(0xFF00E5FF)),
+            label: 'Alarmlar',
           ),
           NavigationDestination(
             icon: Icon(Icons.show_chart_outlined),

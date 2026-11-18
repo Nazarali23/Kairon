@@ -50,7 +50,7 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  Future<bool> signUp(String email, String password) async {
+  Future<bool> signUp(String email, String password, {String? displayName}) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -59,6 +59,9 @@ class AuthService extends ChangeNotifier {
       final res = await Supabase.instance.client.auth.signUp(
         email: email.trim(),
         password: password,
+        data: displayName != null && displayName.isNotEmpty
+            ? {'display_name': displayName.trim()}
+            : null,
       );
       _currentUser = res.user;
       if (_currentUser != null) {

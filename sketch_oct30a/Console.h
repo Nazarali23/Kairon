@@ -45,28 +45,29 @@ void goToSleep() {
 void goToSleep() {}
 #endif
 
-// ================= SERIAL KOMUTLARI =================
-void handleSerial() {
-  if (!Serial.available()) return;
-  String s = Serial.readStringUntil('\n');
+// ================= MERKEZI KONSOL KOMUT MOTORU =================
+// Hem Seri Port'tan hem de Mobil Uygulama / Supabase'den gelen komutlari ortak calistirir
+String runConsoleCommand(String s) {
   s.trim();
-  if (!s.length()) return;
-  Serial.printf("[KOMUT] %s\n", s.c_str());
+  if (!s.length()) return "";
+  Serial.printf("[KONSOL ISLECI] %s\n", s.c_str());
   stopAll();
-  if (s == "dur") return;
-  if (s == "ton") { playTestTone(); return; }
+
+  if (s == "dur") return "Robot durduruldu.";
+  if (s == "ton") { playTestTone(); return "Test tonu calindi."; }
 
   if (s == "/restart" || s == "restart" || s == "/reboot" || s == "reboot") {
     Serial.println("[SISTEM] Yeniden baslatiliyor (ESP.restart)...");
     Serial.flush();
     delay(200);
     ESP.restart();
-    return;
+    return "ESP32 yeniden baslatiliyor...";
   }
+
 #if USE_TFT
   if (s == "/reinit" || s == "/ekran" || s == "ekran") {
     reinitTft();
-    return;
+    return "TFT ekran yeniden baslatildi.";
   }
   if (s.startsWith("/madctl ")) {
     uint8_t v = (uint8_t)strtol(s.substring(8).c_str(), nullptr, 16);
@@ -79,7 +80,7 @@ void handleSerial() {
     tft.setTextColor(C_WHITE);
     tft.setCursor(20, 90);
     tft.print("TEST: ABC 123 Robot");
-    return;
+    return "MADCTL ayarlandi: 0x" + String(v, HEX);
   }
   if (s == "/mirror") {
     static uint8_t mirrorMode = 0;
@@ -91,11 +92,7 @@ void handleSerial() {
     tft.setTextColor(C_GREEN);
     tft.setCursor(20, 50);
     tft.printf("MOD %d (0x%02X)", mirrorMode, modes[mirrorMode]);
-    tft.setTextColor(C_WHITE);
-    tft.setCursor(20, 90);
-    tft.print("TEST: Robot Duzgun mu? 123");
-    Serial.printf("[AYNA] Mod %d (0x%02X). Ekrani kontrol et.\n", mirrorMode, modes[mirrorMode]);
-    return;
+    return "Ayna modu degistirildi: " + String(mirrorMode);
   }
 #endif
 
@@ -106,160 +103,121 @@ void handleSerial() {
       float p = s.substring(5, sp).toFloat();
       float t = s.substring(sp + 1).toFloat();
       lockHeadAt(p, t, 110.0f, 300.0f);
-      Serial.printf("Yeni Aci (Kilitlendi) -> Pan: %.1f (0-180), Tilt: %.1f (sinir %.0f-%.0f)\n", tgtPan, tgtTilt, TILT_MIN, TILT_MAX);
+      return "Yeni aci pan=" + String(tgtPan, 1) + ", tilt=" + String(tgtTilt, 1);
     }
-    return;
+    return "Gecersiz aci komutu. Ornek: /aci 90 90";
   }
   if (s.startsWith("/kafa ")) {
     userLookRequest = true;                       // seri komut = kullanici istegi: "kal" kilitler
-    applyHeadByName(s.substring(6));
-    Serial.printf("Kafa hareketi: %s\n", s.substring(6).c_str());
-    return;
+    String gesture = s.substring(6);
+    applyHeadByName(gesture);
+    return "Kafa hareketi uygulandi: " + gesture;
   }
   if (s.startsWith("/servohiz ")) {
     servoMaxSpeed = constrain(s.substring(10).toFloat(), 25.0f, 180.0f);
     servoMaxAccel = constrain(servoMaxSpeed * 3.2f, 80.0f, 700.0f);
-    Serial.printf("Servo varsayilan hiz: %.1f derece/sn (yumusaklik: %.1f)\n", servoMaxSpeed, servoMaxAccel);
-    return;
+    return "Servo hiz: " + String(servoMaxSpeed, 1) + " deg/s";
   }
-  if (s.startsWith("/sonar")) {                 // /sonar | /sonar on | /sonar off | /sonar test | /sonar log on|off
+  if (s.startsWith("/sonar")) {
     String a = s.substring(6); a.trim();
-    if (a.startsWith("test")) { sonar.selfTest(); return; }
-    if (a.startsWith("log")) { bool on = a.indexOf("on") >= 0; sonar.setDebug(on); Serial.printf("sonar log: %s\n", on ? "ACIK" : "KAPALI"); return; }
+    if (a.startsWith("test")) { sonar.selfTest(); return "Sonar self-test tamamlandi."; }
+    if (a.startsWith("log")) { bool on = a.indexOf("on") >= 0; sonar.setDebug(on); return on ? "Sonar log ACIK" : "Sonar log KAPALI"; }
     if (a.startsWith("on")) sonar.setEnabled(true);
     else if (a.startsWith("off")) sonar.setEnabled(false);
     sonar.printStatus();
-    return;
+    return "Sonar durumu: " + String(sonar.enabled() ? "ETKIN" : "DEVRE DISI") +
+           " | Mesafe: " + String(sonar.distance()) + " cm" +
+           " | Gorunur: " + String(sonar.userVisible() ? "EVET" : "HAYIR");
   }
 
-  if (s == "/reset") { histClear(); sessionLog = ""; sessionTurns = 0; Serial.println("gecici konusma gecmisi silindi"); return; }
-  if (s == "/models") { listModels(); return; }
-  if (s == "/time") { Serial.printf("%s\n", humanTime().c_str()); return; }
-  if (s == "/mem") { printMem(); return; }
-  if (s == "/days") { printDays(); return; }
-  if (s == "/brain") { printBrain(); return; }
-  if (s == "/undo") { Serial.printf("%s\n", memUndo().c_str()); return; }
-  if (s == "/cloud") {
-    logHeap("cloud");
-    Serial.printf("[NET] arka plan serbest: %s\n", NetGuard::backgroundAllowed() ? "evet" : "hayir (konusma/ses var)");
-    Serial.printf("[BULUT] bekleyen yazma istegi: %d\n", sqCount);
-    Serial.printf("[BULUT] etkin: %s | url uzunlugu %d | anahtar uzunlugu %d | wifi %d\n",
-                  cloudEnabled() ? "evet" : "hayir", (int)strlen(SUPABASE_URL), (int)strlen(SUPABASE_KEY), WiFi.status() == WL_CONNECTED);
-    String r; int c = supaRequest("memories?select=id&limit=1", "GET", "", r);
-    Serial.printf("[BULUT] memories GET -> %d %s\n", c, r.substring(0, 120).c_str());
-    return;
-  }
+  if (s == "/reset") { histClear(); sessionLog = ""; sessionTurns = 0; return "Gecici konusma gecmisi silindi."; }
+  if (s == "/models") { listModels(); return "Groq modelleri listelendi (Seri porta bakiniz)."; }
+  if (s == "/time") { return "Sistem Saati: " + humanTime(); }
+  if (s == "/mem") { printMem(); return "Hafiza: " + String(nRecs) + " kayit aktif."; }
+  if (s == "/days") { printDays(); return "Ozel Gunler: " + String(nDays) + " gun kayitli."; }
+  if (s == "/brain") { printBrain(); return "Brain durumu döküldü (Seri porta bakiniz)."; }
+  if (s == "/undo") { return "Geri alindi: " + memUndo(); }
   if (s == "/cloudsync") {
-    // Zorla hepsini gonder (normalde gerekmez: sadece degisenler otomatik gider)
     cloudForceAll();
     for (int i = 0; i < nRecs; i++) cloudUpsertRec(i);
     cloudSyncDays();
     cloudSyncFollowups();
     cloudPushState();
-    Serial.printf("%d ani, %d ozel gun, %d takip ve ayarlar buluta gonderildi\n", nRecs, nDays, nFu);
-    return;
+    return String(nRecs) + " ani, " + String(nDays) + " ozel gun, " + String(nFu) + " takip senkronlandi.";
   }
   if (s == "/cloudpull") {
     cloudPullAll();
-    return;
+    return "Buluttan tum veriler basariyla cekildi.";
   }
   if (s.startsWith("/face ")) {
     int e = s.substring(6).toInt();
     currentEmotion = constrain(e, 0, 8); emotionSetMs = millis();
     setEmotionPose(currentEmotion, tgtL, tgtR); idleActEnd = millis() + 6000;
     applyHeadFromEmotion(currentEmotion);
-    return;
+    return "Yuz ifadesi ayarlandi: " + String(currentEmotion);
   }
   if (s == "/sleep" || s == "/saat") {
     idleAct = A_SLEEP; idleActEnd = millis() + 10000;
     sleepSinceMs = millis() - CLOCK_AFTER_SLEEP_MS + 2000;
     setEmotionPose(0, tgtL, tgtR); tgtL.h = tgtR.h = 3;
-    Serial.println("[UYKU] 2 sn sonra saat ekrani acilacak");
-    return;
+    return "Saat ekranina gecildi.";
   }
 #if ENABLE_SLEEP
   if (s == "/deepsleep" || s == "deepsleep") {
-    Serial.println("[KOMUT] Derin uykuya geciliyor (PIR ile uyanacak)...");
     goToSleep();
-    return;
+    return "Derin uykuya gecildi.";
   }
 #endif
-  if (s.startsWith("/prompt ")) { Serial.println(buildSystem(s.substring(8), false)); return; }
-  if (s == "/embed") { int e = embedPending(8); Serial.printf("%d kayit icin embedding alindi\n", e); memSave(); return; }
-  if (s == "/embedall") {
-    // Onbellekteki tum kayitlari yeniden embedle ve buluta bir kez yaz (bulutta embedding'i eksik kayitlari tamamlamak icin)
-    for (int i = 0; i < nRecs; i++) recs[i].flags &= ~(F_EMB | F_REMOTE);
-    int total = 0, e;
-    for (int round = 0; round < 3 && (e = embedPending(8)) > 0; round++) total += e;
-    Serial.printf("%d kayit embedlendi ve buluta yazildi\n", total);
-    return;
-  }
-  if (s == "/consolidate") {
-    if (sessionTurns == 0) Serial.println("islenecek konusma yok");
-    else { consolidateNotBefore = 0; consolidate(); }
-    printMem();
-    return;
-  }
+  if (s.startsWith("/prompt ")) { return buildSystem(s.substring(8), false); }
   if (s == "/wipe evet") {
     nRecs = 0; nDays = 0; nFu = 0; lastCheckinDate = ""; sessionLog = ""; sessionTurns = 0;
     histClear();
     purgeLocalFiles();
     cloudWipeAll();
-    Serial.println("tum lokal RAM ve bulut hafizasi silindi");
-    return;
+    return "Tum yerel RAM ve bulut hafizasi sifirlandi.";
   }
-  if (s == "/wipe") { Serial.println("TUM hafizayi (bulut dahil) silmek icin: /wipe evet"); return; }
-  if (s == "/muse") { spontaneousSpeak(R_MUSE); return; }
-  if (s == "/arrive") { arrivalPending = true; arrivalAbsenceMin = 180; spontaneousSpeak(R_ARRIVAL); return; }
-  if (s.startsWith("/fu ")) {
-    if (nFu >= MAX_FOLLOW) { Serial.println("takip listesi dolu"); return; }
-    fuText[nFu] = s.substring(4); fuDue[nFu] = dateOf(nowEpoch()); fuAsked[nFu] = false; nFu++;
-    memSave();
-    spontaneousSpeak(R_FOLLOWUP);
-    return;
-  }
-  if (s.startsWith("/remember ")) { Serial.printf("%s\n", rememberNote(s.substring(10)).c_str()); return; }
-  if (s.startsWith("/forget ")) { Serial.printf("%s\n", forgetBest(s.substring(8)).c_str()); return; }
-  if (s.startsWith("/recall ")) { recallDebug(s.substring(8)); return; }
-  if (s.startsWith("/day ")) { Serial.printf("%s\n", addDayFromSpec(s.substring(5)).c_str()); return; }
-  if (s.startsWith("/builtin ")) { builtinDaysOn = s.substring(9).startsWith("on"); memDirty = true; memSave(); printDays(); return; }
+  if (s == "/wipe") { return "TUM hafizayi silmek icin: /wipe evet"; }
+  if (s == "/muse") { spontaneousSpeak(R_MUSE); return "Kairon muse konusmasi baslatildi."; }
+  if (s.startsWith("/remember ")) { return rememberNote(s.substring(10)); }
+  if (s.startsWith("/forget ")) { return forgetBest(s.substring(8)); }
+  if (s.startsWith("/day ")) { return addDayFromSpec(s.substring(5)); }
   if (s.startsWith("/style ")) {
     String resp = applyStyleByName(s.substring(7));
-    Serial.printf("tarz: %s (%s)\n", STYLE_NAMES[styleMode], resp.c_str());
-    return;
+    return "Tarz guncellendi: " + String(STYLE_NAMES[styleMode]) + " (" + resp + ")";
   }
-  if (s.startsWith("/think ")) { llmReasoning = s.substring(7); llmReasoning.trim(); if (llmReasoning == "off") llmReasoning = ""; Serial.printf("dusunme: '%s'\n", llmReasoning.c_str()); return; }
-  if (s.startsWith("/model ")) { llmModel = s.substring(7); llmModel.trim(); Serial.printf("model: %s\n", llmModel.c_str()); return; }
-  if (s.startsWith("/say ")) { speak(s.substring(5)); return; }
-  if (s.startsWith("/speed ")) { ttsSpeed = constrain(s.substring(7).toFloat(), 0.8f, 2.5f); printFx(); return; }
-  if (s.startsWith("/pitch ")) { ttsPitch = constrain(s.substring(7).toFloat(), 0.6f, 1.4f); printFx(); return; }
-  if (s.startsWith("/vol ")) { volume = constrain(s.substring(5).toFloat(), 0.0f, 1.0f); printFx(); return; }
-  if (s.startsWith("/robot ")) {
-    String a = s.substring(7);
-    int sp = a.indexOf(' ');
-    if (sp < 0) robotMix = constrain(a.toFloat(), 0.0f, 1.0f);
-    else {
-      robotMix = constrain(a.substring(0, sp).toFloat(), 0.0f, 1.0f);
-      robotFreq = constrain(a.substring(sp + 1).toFloat(), 20.0f, 400.0f);
-    }
+  if (s.startsWith("/say ")) { speak(s.substring(5)); return "Seslendirildi: " + s.substring(5); }
+  if (s.startsWith("/vol ")) {
+    volume = constrain(s.substring(5).toFloat(), 0.0f, 1.0f);
     printFx();
-    return;
+    return "Ses seviyesi: %" + String((int)(volume * 100));
   }
   if (s == "/qr" || s == "/pair") {
     if (pairingScreen.active) {
       pairingScreen.leave();
-      Serial.println("[PAIR] QR ekrani kapatildi, yuz geri geldi");
+      return "QR ekrani kapatildi, robot yuzu geri geldi.";
     } else {
       String pin = robotPairingPin.length() ? robotPairingPin : "849201";
       pairingScreen.show(pin);
-      Serial.println("[PAIR] QR ekrani acildi. PIN: " + pin);
+      return "QR ekrani acildi. PIN: " + pin;
     }
-    return;
   }
   if (s == "/owner") {
-    Serial.printf("[PAIR] Sahip Kullanici UUID: %s\n", robotOwnerId.length() ? robotOwnerId.c_str() : "(Henuz eslesmedi)");
-    return;
+    return robotOwnerId.length() ? ("Sahip Kullanici UUID: " + robotOwnerId) : "Robot henuz bir hesaba baglanmadi.";
   }
+
+  // Varsayilan: Soru olarak yapay zekaya ilet ve seslendir
   askAndSpeak(s);
+  return "Soru yapay zekaya iletildi: " + s;
 }
 
+// ================= SERIAL PORT YOKLAMA =================
+void handleSerial() {
+  if (!Serial.available()) return;
+  String s = Serial.readStringUntil('\n');
+  s.trim();
+  if (!s.length()) return;
+  String result = runConsoleCommand(s);
+  if (result.length()) {
+    Serial.printf("[KONSOL] %s\n", result.c_str());
+  }
+}

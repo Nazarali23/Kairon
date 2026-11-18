@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/robot_state_model.dart';
+import '../models/reminder_model.dart';
 import '../core/config.dart';
 
 class SupabaseService extends ChangeNotifier {
@@ -11,10 +12,16 @@ class SupabaseService extends ChangeNotifier {
   String? _errorMessage;
   Timer? _pollingTimer;
 
+  List<ReminderModel> _reminders = [];
+  bool _isRemindersLoading = false;
+
   RobotStateModel? get robotState => _robotState;
   bool get isPcOnline => _isPcOnline;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+
+  List<ReminderModel> get reminders => _reminders;
+  bool get isRemindersLoading => _isRemindersLoading;
 
   SupabaseService() {
     init();
@@ -33,6 +40,7 @@ class SupabaseService extends ChangeNotifier {
     try {
       await fetchRobotState();
       await fetchPcState();
+      await fetchReminders();
 
       // Periyodik kontrol (10 saniye)
       _pollingTimer?.cancel();
@@ -41,7 +49,7 @@ class SupabaseService extends ChangeNotifier {
         fetchPcState();
       });
 
-      // Supabase Realtime aboneliği
+      // Supabase Realtime aboneliği (robot_state)
       Supabase.instance.client
           .from('robot_state')
           .stream(primaryKey: ['id'])
@@ -103,11 +111,13 @@ class SupabaseService extends ChangeNotifier {
     }
   }
 
-  Future<bool> setMode(String newMode) async {
+  /// Çoklu mod listesini virgülle ayrılmış şekilde kaydeder
+  Future<bool> setModes(List<String> modes) async {
     if (!AppConfig.isConfigured || _robotState == null) return false;
+    final modesStr = modes.isEmpty ? 'normal' : modes.join(',');
     try {
       await Supabase.instance.client.from('robot_state').update({
-        'active_mode': newMode,
+        'active_mode': modesStr,
         'config_version': _robotState!.configVersion + 1,
       }).eq('id', 1);
 
@@ -116,6 +126,93 @@ class SupabaseService extends ChangeNotifier {
     } catch (e) {
       _errorMessage = e.toString();
       notifyListeners();
+      return false;
+    }
+  }
+
+  /// Belirli bir modu açıp kapatır (çoklu mod)
+  Future<bool> toggleMode(String mode) async {
+    if (_robotState == null) return false;
+    final currentList = List<String>.from(_robotState!.activeModesList);
+    if (currentList.contains(mode)) {
+      currentList.remove(mode);
+    } else {
+      currentList.add(mode);
+    }
+    return setModes(currentList);
+  }
+
+  /// Tekil mod ayarı (eski geriye uyumluluk)
+  Future<bool> setMode(String newMode) async {
+    return setModes([newMode]);
+  }
+
+  /// Robot Kişilik / Karakter Tarzı Ayarı
+  Future<bool> setStyleMode(String style) async {
+    if (!AppConfig.isConfigured || _robotState == null) return false;
+    try {
+      await Supabase.instance.client.from('robot_state').update({
+        'style_mode': style,
+        'config_version': _robotState!.configVersion + 1,
+      }).eq('id', 1);
+
+      await fetchRobotState();
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Ekran Parlaklığı Ayarı (0 - 100)
+  Future<bool> setScreenBrightness(int brightness) async {
+    if (!AppConfig.isConfigured || _robotState == null) return false;
+    try {
+      await Supabase.instance.client.from('robot_state').update({
+        'screen_brightness': brightness.clamp(0, 100),
+        'config_version': _robotState!.configVersion + 1,
+      }).eq('id', 1);
+
+      await fetchRobotState();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Kairon IDE Konsol Komutu Gönder (Geçici terminal, DB şişirmez)
+  Future<bool> executeConsoleCommand(String command) async {
+    if (!AppConfig.isConfigured || _robotState == null) return false;
+    final cmd = command.trim();
+    if (cmd.isEmpty) return false;
+
+    try {
+      await Supabase.instance.client.from('robot_state').update({
+        'console_cmd': cmd,
+      }).eq('id', 1);
+
+      await fetchRobotState();
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Konsol Çıktısını Temizle
+  Future<bool> clearConsoleOutput() async {
+    if (!AppConfig.isConfigured) return false;
+    try {
+      await Supabase.instance.client.from('robot_state').update({
+        'console_cmd': '',
+        'console_output': '',
+      }).eq('id', 1);
+
+      await fetchRobotState();
+      return true;
+    } catch (e) {
       return false;
     }
   }
@@ -148,6 +245,78 @@ class SupabaseService extends ChangeNotifier {
       }).eq('id', 1);
 
       await fetchRobotState();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // ================= HATIRLATICI & FOLLOWUPS =================
+
+  Future<void> fetchReminders() async {
+    if (!AppConfig.isConfigured) return;
+    _isRemindersLoading = true;
+    notifyListeners();
+
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      var query = Supabase.instance.client.from('followups').select();
+      if (user != null) {
+        query = query.or('user_id.eq.${user.id},user_id.is.null');
+      }
+
+      final res = await query.order('id', ascending: false).limit(20);
+      _reminders = (res as List).map((row) => ReminderModel.fromJson(row)).toList();
+    } catch (e) {
+      debugPrint('Reminders fetch error: $e');
+    } finally {
+      _isRemindersLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> addReminder(String text, String due, {String recurring = 'none'}) async {
+    if (!AppConfig.isConfigured) return false;
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      final payload = {
+        'text': text.trim(),
+        'due': due.trim(),
+        'asked': false,
+        'recurring': recurring,
+        if (user != null) 'user_id': user.id,
+      };
+
+      await Supabase.instance.client.from('followups').insert(payload);
+      await fetchReminders();
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> toggleReminderAsked(int id, bool currentAsked) async {
+    if (!AppConfig.isConfigured) return false;
+    try {
+      await Supabase.instance.client
+          .from('followups')
+          .update({'asked': !currentAsked})
+          .eq('id', id);
+
+      await fetchReminders();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> deleteReminder(int id) async {
+    if (!AppConfig.isConfigured) return false;
+    try {
+      await Supabase.instance.client.from('followups').delete().eq('id', id);
+      await fetchReminders();
       return true;
     } catch (e) {
       return false;

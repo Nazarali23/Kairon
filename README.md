@@ -21,21 +21,24 @@
                      ┌─────────────────────────────────────────┐
                      │          Kairon Robotu (ESP32-S3)       │
                      │  - INMP441 I2S Mic -> Groq Whisper STT  │
-                     │  - Groq LLM (Karakter + Niyet Çıkarımı) │
-                     │  - ST7789 TFT Akışkan Göz Animasyonu    │
+                     │  - Groq LLM (6 Karakter + Niyet Analizi)│
+                     │  - ST7789 TFT Gözler & Dahili QR Ekranı │
                      │  - Çift HC-SR04 Sonar + PIR Sensör      │
                      │  - Pan/Tilt MG90S Kafa Takip Servoları  │
+                     │  - Geçici Donanım Test Konsolu          │
                      └───────┬─────────────────────────▲───────┘
                              │                         │
      1. HMAC İmzalı Komut    │                         │ 4. robot_state.pending_say
-        ve Sensör Logları    │                         │    (Sonuç Seslendirme)
+        ve Sensör Logları    │                         │    veya console_output
                              ▼                         │
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                       BULUT OMURGASI (Supabase)                             │
 │                                                                             │
+│  - pairing_sessions: Güvenli QR & 6 Haneli PIN ile Cihaz Sahiplenme         │
 │  - pc_commands: İmzalı görev kuyruğu (HMAC, Nonce, Zaman Damgası)           │
 │  - pc_agent_state: PC ajanı çevrimiçi / canlılık durumu (Heartbeat)          │
-│  - robot_state: Modlar, göz rengi, ses seviyesi, pending_say (id=1)        │
+│  - robot_state: Çoklu modlar, kişilik, geçici console_cmd/output (id=1)     │
+│  - followups: Saatli, tekrarlı ve tek seferlik kullanıcı hatırlatıcıları    │
 │  - sensor_logs: Postür mesafesi (cm), PIR hareket alarmları, uyku analizleri │
 │  - app_inbox: PC ajanından telefona gönderilen belge özetleri              │
 └──────────────▲───────────────────────────────────────────────┬──────────────┘
@@ -45,14 +48,43 @@
 ┌──────────────────────────────┐               ┌──────────────────────────────┐
 │  KaironAgent (Windows / Py)  │               │   KaironMobile (Flutter)     │
 │                              │               │                              │
-│ - HMAC-SHA256 Doğrulayıcı    │               │ - 6 Akıllı Çalışma Modu      │
-│ - PathGuard & İzinli Dizinler│               │ - fl_chart IoT Telemetrisi   │
-│ - Otonom Dosya Düzenleme     │               │ - Pomodoro & Postür Uyarısı  │
-│ - Masaüstü Onay Penceresi    │               │ - Anlık Bekçi Güvenlik Alarmı│
-│ - SQLite Geri Alma (Journal) │               │ - Belge Özetleri Okuma       │
-│ - Görsel İmleç Koreografisi  │               │ - Web & Android Desteği      │
+│ - HMAC-SHA256 Doğrulayıcı    │               │ - Çoklu Eşzamanlı Mod Seçimi │
+│ - PathGuard & İzinli Dizinler│               │ - 6 Farklı Robot Kişilik Modu│
+│ - Otonom Dosya Düzenleme     │               │ - Kamera ile QR Tarama / PIN │
+│ - Masaüstü Onay Penceresi    │               │ - Kairon IDE Test Konsolu    │
+│ - SQLite Geri Alma (Journal) │               │ - Saatli Hatırlatıcı Yönetimi│
+│ - QR & PIN Eşleşme Arayüzü   │               │ - Web & Android Desteği      │
 └──────────────────────────────┘               └──────────────────────────────┘
 ```
+
+---
+
+## 🚀 Öne Çıkan Yeni Özellikler (V2)
+
+1. **🔐 Çok Kullanıcılı Cihaz İzolasyonu & QR/PIN Eşleştirme:**
+   - Robot (TFT ekranı) ve PC Ajanı açılışta geçici 6 haneli PIN ve QR kod üretir.
+   - Kullanıcı mobil uygulamadan kamerayla QR tarayarak ya da PIN girerek cihazı kendi hesabına bağlar (`claimDevice`).
+   - Veritabanındaki tüm anılar, hatırlatıcılar ve komutlar sadece eşleşen kullanıcıya izoledir.
+2. **🔄 Eşzamanlı Çoklu Mod Aktivasyonu:**
+   - Kullanıcı dilediği modları aynı anda etkinleştirebilir (örn: *Siber Ofis* + *Derin Odak*, veya *Asistan* + *Bekçi*).
+3. **🎭 6 Farklı Robot Karakteri & Konuşma Üslubu:**
+   - `Memory.h` motorundaki 6 kişilik mobilden anında seçilebilir:
+     - **Şakacı (Komik):** Mizah dolu, eğlenceli yanıtlar.
+     - **Ciddi:** Resmi, net ve kısa üslup.
+     - **Zeki & Bilimsel:** Analitik ve detaylı açıklamalar.
+     - **Soğuk:** Az ve öz konuşan minimalist tarz.
+     - **Sevimli & Duygusal:** Sıcakkanlı, empatik yaklaşım.
+     - **Otomatik (Dinamik):** Ortam koşullarına ve zamana göre uyarlanan dinamik karakter.
+4. **💻 Kairon IDE Test Konsolu (Geçici Bellek Oturumu):**
+   - Donanım komutları (`/sonar`, `/brain`, `/kafa`, `/time`, `/say`, `/restart`) mobilden doğrudan çalıştırılabilir.
+   - Çıktılar IDE terminali gibi anlık izlenir; veritabanında satır birikmez (`robot_state.console_cmd` ve `console_output` üzerinde geçici oturum).
+5. **⏰ Saatli & Tekrarlı Hatırlatıcılar (`followups`):**
+   - Belirli saat ve tarihte (örn: 12:30'da evden çıkmamı söyle) robota hatırlatma ekleme.
+   - Tek seferlik, günlük veya haftalık tekrar seçenekleri.
+   - Tamamlanan hatırlatıcıları işaretleme ve silme.
+6. **🔊 Ses & Ekran Kontrolleri:**
+   - Hoparlör ses seviyesi slider'ı (%0 - %100).
+   - ST7789 ekran durumu ve parlaklık ayarları.
 
 ---
 
@@ -60,78 +92,50 @@
 
 ### 1. 🤖 Robot Firmware (`sketch_oct30a`)
 ESP32-S3 tabanlı ana kontrol birimi. Donanım seviyesinde FreeRTOS görevleri (`faceTask`, `servoTask`, `cloudTask`, `sonarTask`) çalıştırır.
-- **Ekran:** 2.8" SPI TFT (240x320) ST7789, parametrik göz ifadeleri ve duygu animasyonları.
+- **Ekran:** 2.8" SPI TFT (240x320) ST7789, parametrik göz ifadeleri, duygu animasyonları ve dahili QR ekranı.
 - **Ses:** INMP441 I2S mikrofon + MAX98357A I2S amfi + Google Translate TTS robotik efekt motoru.
-- **Sensör Füzyonu:** PIR (GPIO 2) ile varlık algılama; sol (Trig 42, Echo 41) ve sağ (Trig 40, Echo 39) ultrasonik sensörlerle kafa takip ve postür mesafesi ölçümü.
+- **Sensör Füzyonu:** PIR (GPIO 2) ile varlık algılama; çift ultrasonik sensörle kafa takip ve postür mesafesi ölçümü.
 - **Güvenlik Koruması:** `secrets.h`, bulut algoritmaları ve ses kütüphaneleri repodan dışlanmış olup yalnızca açık donanım tanımları (`Config.h`, `Console.h`, `sketch_oct30a.ino`) repoda paylaşılır.
 - 👉 Ayrıntılar için: [sketch_oct30a/README.md](sketch_oct30a/README.md)
 
 ### 2. 💻 KaironAgent (`pc-python`)
 Windows bilgisayarında arka planda çalışan ve robottan gelen imzalı komutları güvenle icra eden masaüstü otomasyon ajanı.
 - **Python 3.12 + Asyncio:** `httpx` üzerinden Supabase komut kuyruğunu dinler.
-- **Tavizsiz Güvenlik (Bölüm 13):** HMAC-SHA256 imzası, replay koruması (SQLite nonce), dosya silme yasağı, izinli kök dizinler (Masaüstü, İndirilenler, Belgeler) ve PathGuard denetimi.
+- **Tavizsiz Güvenlik:** HMAC-SHA256 imzası, replay koruması (SQLite nonce), dosya silme yasağı, izinli kök dizinler (Masaüstü, İndirilenler, Belgeler) ve PathGuard denetimi.
 - **Dinamik Ekran Ölçeği Algılama:** Windows API üzerinden DPI ölçeğini (%100, %125, %150) otomatik tespit eder.
 - **Akıllı Planlama:** Groq Qwen modeli ile görev ayrıştırma, otomatik klasör adlandırma ve SQLite tabanlı geri alma (undo) günlüğü.
 - 👉 Ayrıntılar için: [pc-python/README.md](pc-python/README.md)
 
 ### 3. 📱 KaironMobile (`mobil-flutter`)
 Robotu internet üzerinden izlemeyi, modlarını değiştirmeyi ve sensör verilerini grafiklerle analiz etmeyi sağlayan Material 3 Siber Koyu temalı mobil/web uygulaması.
-- **6 Akıllı Mod:** Standart Asistan, Derin Odak (Pomodoro & 35cm Postür Uyarısı), Bekçi (Alan Güvenliği & Hareket Alarmı), Uyku (Gece Hareket Analizi), Sağlık & Refakatçi, Siber Ofis.
+- **Kamera ile QR Tarama & PIN:** Cihazı saniyeler içinde hesaba bağlama.
+- **Çoklu Akıllı Modlar:** Eşzamanlı çalıştırılabilen 6 mod.
+- **Kairon IDE Konsolu:** Donanım testlerini doğrudan cep telefonundan yapma.
 - **IoT Telemetrisi (`fl_chart`):** Canlı postür mesafesi grafiği, saatlik doluluk ve hareketlilik dağılımı.
-- **Siber Ofis Özet Kutusu:** PC ajanının Word ve PDF dosyalarından çıkardığı özetleri listeleme ve robota seslendirme.
-- 👉 Ayrıntılar için: [mobil-flutter/README.md](mobil-flutter/README.md)
-
-### 4. ☁️ Supabase Veritabanı (`supabase_init.sql`)
-PostgreSQL veritabanı üzerinde çalışan merkezi iletişim omurgası.
-- RLS (Row Level Security) ile korunan `pc_commands`, `pc_agent_state`, `sensor_logs` ve `app_inbox` tabloları.
-- Supabase Realtime abonelikleri ile cihazlar arası milisaniyelik senkronizasyon.
+- **Hatırlatıcılar & Alarmlar:** Tam saatinde seslendirilen bildirimler.
 
 ---
 
-## 🚀 Hızlı Başlangıç
+## 🛠️ Kurulum Adımları
 
-### Adım 1: Veritabanını Kurun
-1. Supabase projenizde **SQL Editor** sekmesini açın.
-2. [supabase_init.sql](supabase_init.sql) dosyasının içeriğini yapıştırın ve **Run** butonuna basın.
+### 1. Veritabanı (Supabase)
+Supabase projenizin SQL editöründe aşağıdaki sırayla scriptleri çalıştırın:
+1. `supabase_init.sql` (Temel tablolar ve yapılar)
+2. `supabase_multiuser_isolation.sql` (Çok kullanıcılı izolasyon ve cihaz eşleşmesi)
+3. `supabase_v2_features.sql` (Konsol, çoklu mod ve hatırlatıcı sütunları)
 
-### Adım 2: PC Ajanını Başlatın
-```bash
+### 2. PC Ajanı (`pc-python`)
+```powershell
 cd pc-python
-
-# 1. HMAC anahtarını üretin
-.\.venv\Scripts\python scripts/gen_secret.py
-
-# 2. Anahtarları Windows Keyring'e güvenle kaydedin
-.\.venv\Scripts\python scripts/set_keys.py
-
-# 3. Ajanı başlatın
-.\.venv\Scripts\python -m kaironagent
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python app.py
 ```
 
-### Adım 3: Mobil / Web Uygulamasını Başlatın
-```bash
+### 3. Mobil Uygulama (`mobil-flutter`)
+```powershell
 cd mobil-flutter
-
-# Web üzerinde test etmek için:
-flutter run -d chrome
-
-# Android telefonda test etmek için:
-flutter run
+flutter pub get
+flutter run -d chrome  # veya android cihazınız
 ```
-*(Supabase URL ve Anon Key bilginizi [mobil-flutter/lib/core/config.dart](mobil-flutter/lib/core/config.dart) dosyasına ekleyin.)*
-
-### Adım 4: ESP32 Robot Güncellemesi
-[esp32_v0_patch.md](esp32_v0_patch.md) dosyasındaki küçük kod parçalarını Arduino IDE projenize (`secrets.h`, `Config.h`, `Cloud.h`, `Console.h`) ekleyip karta yükleyin.
-
----
-
-## 🛡️ Güvenlik İlkeleri
-1. **İmzasız İşlem Yapılmaz:** Robot dışından veya sahte anahtarla gelen komutlar anında reddedilir.
-2. **Kritik Kod Gizliliği:** Özel algoritmalar ve API anahtarları `.gitignore` koruması altındadır, açık repoya dahil edilmez.
-3. **Masaüstü Güvenliği:** PC ajanı sistem dizinlerine (Windows, AppData vb.) asla dokunamaz; silme yapmaz; taşınan her dosya `undo` ile eski konumuna döndürülebilir.
-4. **Kullanıcı Önceliği:** Fareye dokunulduğu veya acil durdurma kısayolu (`Ctrl+Alt+Esc`) basıldığı anda ajan durur.
-
----
-
-## 📄 Lisans
-Bu proje Nazarali tarafından geliştirilmektedir. Tüm hakları saklıdır.
