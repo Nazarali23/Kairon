@@ -1,0 +1,12 @@
+# Kairon Robot ESP32 Donanım Kodları Git Koruma Kuralı
+# GÜVENLİK GEREĞİ: secrets.h, Cloud.h, Brain.h, Audio.h vb. dosyalar asla repoya dahil edilmez.
+# Yalnızca ana .ino taslağı, Console.h, Config.h ve README.md takip edilir.
+
+*
+!*.ino
+!Config.h
+!Console.h
+!config.h
+!console.h
+!README.md
+!.gitignore

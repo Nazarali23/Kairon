@@ -1,0 +1,64 @@
+# ====================================================================
+# KAIRON REPOSITORY .GITIGNORE
+# ====================================================================
+
+# --------------------------------------------------------------------
+# 1. ESP32 ROBOT DONANIM VE FIRMWARE KORUMASI (ÖNEMLİ)
+# Sadece ana .ino taslağı, Config.h, Console.h ve README.md takip edilir.
+# secrets.h, Brain.h, Cloud.h, Audio.h vb. tüm gizli ve özel dosyalar engellenir.
+# --------------------------------------------------------------------
+sketch_oct30a/*
+!sketch_oct30a/*.ino
+!sketch_oct30a/Config.h
+!sketch_oct30a/Console.h
+!sketch_oct30a/config.h
+!sketch_oct30a/console.h
+!sketch_oct30a/README.md
+!sketch_oct30a/.gitignore
+
+# --------------------------------------------------------------------
+# 2. PYTHON (KAIRON AGENT) ÇALIŞMA ORTAMI VE VERİ TABANLARI
+# --------------------------------------------------------------------
+.venv/
+venv/
+pc-python/.venv/
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite
+*.sqlite3
+.pytest_cache/
+pc-python/.pytest_cache/
+*.egg-info/
+pc-python/src/*.egg-info/
+build/
+dist/
+pc-python/config.toml
+
+# --------------------------------------------------------------------
+# 3. FLUTTER (KAIRON MOBILE) GEÇİCİ DERLEME DOSYALARI
+# --------------------------------------------------------------------
+mobil-flutter/.dart_tool/
+mobil-flutter/.flutter-plugins
+mobil-flutter/.flutter-plugins-dependencies
+mobil-flutter/.idea/
+mobil-flutter/*.iml
+mobil-flutter/android/kairon_mobile_android.iml
+mobil-flutter/build/
+mobil-flutter/android/.gradle/
+mobil-flutter/android/local.properties
+
+# --------------------------------------------------------------------
+# 4. GENEL SIRLAR, ORTAM DEĞİŞKENLERİ VE GÜNLÜKLER
+# --------------------------------------------------------------------
+secrets.h
+*.secret
+*.key
+*.pem
+.env
+*.env
+*.log
+test_tmp/
+.DS_Store
+Thumbs.db

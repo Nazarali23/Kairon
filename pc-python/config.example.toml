@@ -1,0 +1,28 @@
+[cloud]
+supabase_url = "https://your-project.supabase.co"
+poll_active_s = 2
+poll_idle_s = 8
+heartbeat_s = 15
+
+[security]
+roots = ["desktop", "downloads", "documents"]
+max_files_per_command = 200
+timestamp_window_s = 90
+auto_confirm_max_files = 5
+allow_delete = false
+rate_limit_per_min = 3
+
+[planner]
+provider = "groq"
+model = "qwen-2.5-32b"
+temperature = 0.0
+send_pdf_text_to_llm = false
+
+[cursor]
+enabled = false
+max_icons_to_visit = 6
+abort_on_user_mouse = true
+hotkey_pause = "ctrl+alt+esc"
+
+[robot]
+say_max_chars = 250
