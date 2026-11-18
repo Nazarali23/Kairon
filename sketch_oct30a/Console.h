@@ -126,7 +126,7 @@ String runConsoleCommand(String s) {
     else if (a.startsWith("off")) sonar.setEnabled(false);
     sonar.printStatus();
     return "Sonar durumu: " + String(sonar.enabled() ? "ETKIN" : "DEVRE DISI") +
-           " | Mesafe: " + String(sonar.distance()) + " cm" +
+           " | Mesafe: " + String(sonar.nearestCm(), 1) + " cm" +
            " | Gorunur: " + String(sonar.userVisible() ? "EVET" : "HAYIR");
   }
 
