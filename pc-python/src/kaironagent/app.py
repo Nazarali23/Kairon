@@ -181,8 +181,35 @@ class KaironAgentApp:
             if onedrive_desktop.exists():
                 desktop = onedrive_desktop
 
-        # 1. SENARYO: PDF Dosyalarını Klasörleme
-        if "pdf" in u_lower and ("klasör" in u_lower or "taşı" in u_lower or "düzenle" in u_lower or "toparla" in u_lower):
+        # 1. SENARYO: Belirli Bir Dosyayı Silme / Kaldırma ("1.pdf dosyasını sil", "sil", "kaldır")
+        if any(w in u_lower for w in ["sil", "kaldır", "kaldir", "delete", "remove"]):
+            import re
+            file_match = re.search(r'([\w\-\.]+\.\w+)', clean_text)
+            target_file = None
+            if file_match:
+                fname = file_match.group(1).strip()
+                cand = desktop / fname
+                if cand.exists() and cand.is_file():
+                    target_file = cand
+                else:
+                    for f in desktop.iterdir():
+                        if f.is_file() and f.name.lower() == fname.lower():
+                            target_file = f
+                            break
+
+            if target_file and target_file.exists():
+                try:
+                    target_file.unlink()
+                    res = f"Masaüstündeki '{target_file.name}' dosyası başarıyla silindi."
+                    report = f"Dosya Silme İşlemi Başarılı:\n- Silinen Dosya: {target_file}\n- Konum: {desktop}"
+                    return res, report
+                except Exception as e:
+                    return f"'{target_file.name}' dosyası silinirken hata oluştu: {e}", str(e)
+            else:
+                return f"Silinmek istenen dosya masaüstünde bulunamadı: '{clean_text}'", f"Masaüstü kontrol edildi, eşleşen dosya bulunamadı."
+
+        # 2. SENARYO: PDF Dosyalarını Klasörleme
+        elif "pdf" in u_lower and ("klasör" in u_lower or "taşı" in u_lower or "düzenle" in u_lower or "toparla" in u_lower):
             target_dir = desktop / "PDF_Belgeleri"
             target_dir.mkdir(exist_ok=True)
 
@@ -252,7 +279,23 @@ class KaironAgentApp:
             report = f"Masaüstü Düzenleme Raporu:\nToplam {moved_count} dosya düzenlendi:\n" + "\n".join(f"  • {d}" for d in moved_details)
             return res, report
 
-        # 3. SENARYO: Groq LLM Destekli Genel Görev veya Not
+        # 4. SENARYO: Uygulama Başlatma ("not defterini aç", "hesap makinesini aç")
+        elif any(w in u_lower for w in ["aç", "başlat", "calistir", "çalıştır"]):
+            import subprocess
+            if "not defter" in u_lower or "notepad" in u_lower:
+                subprocess.Popen(["notepad.exe"])
+                return "Not defteri uygulaması açıldı.", "Windows Not Defteri başlatıldı."
+            elif "hesap" in u_lower or "calc" in u_lower:
+                subprocess.Popen(["calc.exe"])
+                return "Hesap makinesi açıldı.", "Windows Hesap Makinesi başlatıldı."
+            elif "tarayıcı" in u_lower or "chrome" in u_lower or "browser" in u_lower:
+                import webbrowser
+                webbrowser.open("https://google.com")
+                return "İnternet tarayıcısı açıldı.", "Varsayılan web tarayıcısı başlatıldı."
+            else:
+                return f"'{clean_text}' işlemi için uygulama başlatılamadı.", "Tanınmayan uygulama açma komutu."
+
+        # 5. SENARYO: Groq LLM Destekli Genel Görev veya Not
         else:
             if self.config.groq_api_key:
                 try:
