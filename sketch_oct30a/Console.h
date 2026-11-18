@@ -149,6 +149,15 @@ String runConsoleCommand(String s) {
     cloudPullAll();
     return "Buluttan tum veriler basariyla cekildi.";
   }
+
+  // PC Ajanina Otonom Gorev Emretme (/ajan-yap)
+  if (s.startsWith("/ajan-yap ") || s.startsWith("/ajanyap ") || s.startsWith("/pc ")) {
+    int sp = s.indexOf(' ');
+    String task = (sp >= 0) ? s.substring(sp + 1) : "";
+    task.trim();
+    if (!task.length()) return "Kullanim: /ajan-yap <yapilacak gorev>";
+    return cloudSendPcCommand(task);
+  }
   if (s.startsWith("/face ")) {
     int e = s.substring(6).toInt();
     currentEmotion = constrain(e, 0, 8); emotionSetMs = millis();

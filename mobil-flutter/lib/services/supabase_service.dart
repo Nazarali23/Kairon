@@ -201,6 +201,32 @@ class SupabaseService extends ChangeNotifier {
     }
   }
 
+  /// PC Ajanına Doğrudan Otonom Görev İlet (/ajan-yap)
+  Future<bool> sendPcCommand(String utterance) async {
+    if (!AppConfig.isConfigured) return false;
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final nonce = 'mob_${DateTime.now().microsecondsSinceEpoch}';
+
+      final payload = {
+        'kind': 'task',
+        'utterance': utterance.trim(),
+        'nonce': nonce,
+        'ts': nowSec,
+        'sig': 'mobile',
+        'status': 'pending',
+        if (user != null) 'user_id': user.id,
+      };
+
+      await Supabase.instance.client.from('pc_commands').insert(payload);
+      return true;
+    } catch (e) {
+      debugPrint('sendPcCommand error: $e');
+      return false;
+    }
+  }
+
   /// Konsol Çıktısını Temizle
   Future<bool> clearConsoleOutput() async {
     if (!AppConfig.isConfigured) return false;

@@ -184,3 +184,24 @@ class SupabaseClient:
         except Exception as e:
             logger.warning(f"Robot konuşma komutu yazılamadı: {e}")
             return False
+
+    async def send_inbox_summary(self, title: str, body: str, user_id: Optional[str] = None) -> bool:
+        """Mobil uygulamaya (app_inbox) belge/işlem özeti raporu gönderir."""
+        url = "/rest/v1/app_inbox"
+        payload = {
+            "source": "pc_agent",
+            "kind": "summary",
+            "title": title[:100],
+            "body": body,
+            "is_read": False
+        }
+        if user_id:
+            payload["user_id"] = user_id
+
+        try:
+            async with self._client() as client:
+                resp = await client.post(url, json=payload)
+                return resp.status_code in (200, 201)
+        except Exception as e:
+            logger.warning(f"Gelen kutusu özeti gönderilemedi: {e}")
+            return False

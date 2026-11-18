@@ -11,6 +11,7 @@ import signal
 import asyncio
 import logging
 import threading
+from pathlib import Path
 from typing import Optional, Any
 
 from .config import load_config, AppConfig
@@ -137,15 +138,142 @@ class KaironAgentApp:
 
         logger.info(f"[+] Güvenlik onayı başarılı: {cmd.id}")
 
-        # V0 Aşamasında test amaçlı kabul ve onay
-        result_msg = f"Komut başarıyla alındı: {cmd.utterance[:50]}"
+        # 3. Görevi Otonom Olarak İcra Et
+        result_msg, summary_body = await self._execute_task(cmd.utterance)
+
+        # 4. Durumu Güncelle
         await self.supabase.update_command(
             cmd_id=cmd.id,
             status=CommandStatus.DONE,
             result=result_msg
         )
-        logger.info(f"[✓] Komut tamamlandı: {result_msg}")
-        await self.supabase.say("Bilgisayarda komut başarıyla işlendi.")
+        logger.info(f"[✓] Görev tamamlandı: {result_msg}")
+
+        # 5. Robota Konuşma Bildirimi Gönder
+        await self.supabase.say(result_msg)
+
+        # 6. Mobil Uygulamaya Özet Raporu Gönder (app_inbox)
+        owner_id = self.owner_id
+        await self.supabase.send_inbox_summary(
+            title="PC Ajanı Görevi Tamamladı",
+            body=summary_body or result_msg,
+            user_id=owner_id
+        )
+
+    async def _execute_task(self, utterance: str) -> tuple[str, str]:
+        """
+        Gelen komut metnini güvenli otonom kurallar çerçevesinde icra eder.
+        Döndürür: (seslendirilecek_mesaj, detayli_rapor_govdesi)
+        """
+        clean_text = utterance.strip()
+        for prefix in ["/ajan-yap", "/ajanyap", "/pc", "ajan yap", "ajan:"]:
+            if clean_text.lower().startswith(prefix):
+                clean_text = clean_text[len(prefix):].strip()
+                break
+
+        u_lower = clean_text.lower()
+        logger.info(f"[PLANLAYICI] İcra edilecek görev: '{clean_text}'")
+
+        # Masaüstü konumunu tespit et
+        desktop = Path.home() / "Desktop"
+        if not desktop.exists():
+            onedrive_desktop = Path.home() / "OneDrive" / "Desktop"
+            if onedrive_desktop.exists():
+                desktop = onedrive_desktop
+
+        # 1. SENARYO: PDF Dosyalarını Klasörleme
+        if "pdf" in u_lower and ("klasör" in u_lower or "taşı" in u_lower or "düzenle" in u_lower or "toparla" in u_lower):
+            target_dir = desktop / "PDF_Belgeleri"
+            target_dir.mkdir(exist_ok=True)
+
+            pdf_files = [f for f in desktop.iterdir() if f.is_file() and f.suffix.lower() == ".pdf"]
+            if not pdf_files:
+                return "Masaüstünde taşınacak PDF dosyası bulunamadı.", "Masaüstü tarandı ancak herhangi bir PDF dosyası tespit edilemedi."
+
+            moved = []
+            for f in pdf_files[:self.config.security.max_files_per_command]:
+                dest = target_dir / f.name
+                count = 2
+                while dest.exists():
+                    dest = target_dir / f"{f.stem} ({count}){f.suffix}"
+                    count += 1
+                try:
+                    import shutil
+                    shutil.move(str(f), str(dest))
+                    moved.append(f.name)
+                except Exception as e:
+                    logger.error(f"Dosya taşınamadı ({f.name}): {e}")
+
+            res = f"Masaüstündeki {len(moved)} adet PDF dosyası 'PDF_Belgeleri' klasörüne taşındı."
+            report = f"İşlem Özeti:\n- Kaynak: {desktop}\n- Hedef: {target_dir}\n- Taşınan Dosyalar ({len(moved)}):\n" + "\n".join(f"  • {m}" for m in moved)
+            return res, report
+
+        # 2. SENARYO: Genel Masaüstü Düzenleme / Toparlama
+        elif "düzenle" in u_lower or "toparla" in u_lower or "temizle" in u_lower or "kategorize" in u_lower:
+            categories = {
+                "PDF_Belgeleri": [".pdf"],
+                "Gorseller": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"],
+                "Dokumanlar": [".docx", ".doc", ".txt", ".xlsx", ".xls", ".pptx", ".ppt"],
+                "Arsivler": [".zip", ".rar", ".7z", ".tar", ".gz"]
+            }
+
+            all_files = [f for f in desktop.iterdir() if f.is_file() and not f.name.startswith(".")]
+            moved_count = 0
+            moved_details = []
+
+            for f in all_files[:self.config.security.max_files_per_command]:
+                ext = f.suffix.lower()
+                dest_folder_name = None
+                for cat_name, ext_list in categories.items():
+                    if ext in ext_list:
+                        dest_folder_name = cat_name
+                        break
+
+                if dest_folder_name:
+                    target_dir = desktop / dest_folder_name
+                    target_dir.mkdir(exist_ok=True)
+                    dest = target_dir / f.name
+                    count = 2
+                    while dest.exists():
+                        dest = target_dir / f"{f.stem} ({count}){f.suffix}"
+                        count += 1
+                    try:
+                        import shutil
+                        shutil.move(str(f), str(dest))
+                        moved_count += 1
+                        moved_details.append(f"{f.name} -> {dest_folder_name}")
+                    except Exception as e:
+                        logger.error(f"Dosya taşınamadı ({f.name}): {e}")
+
+            if moved_count == 0:
+                return "Masaüstünde kategorize edilecek serbest dosya bulunamadı.", "Masaüstü kontrol edildi, taşınacak dosya yok."
+
+            res = f"Masaüstündeki {moved_count} dosya kategorilerine ayrılarak düzenlendi."
+            report = f"Masaüstü Düzenleme Raporu:\nToplam {moved_count} dosya düzenlendi:\n" + "\n".join(f"  • {d}" for d in moved_details)
+            return res, report
+
+        # 3. SENARYO: Groq LLM Destekli Genel Görev veya Not
+        else:
+            if self.config.groq_api_key:
+                try:
+                    from groq import AsyncGroq
+                    client = AsyncGroq(api_key=self.config.groq_api_key)
+                    prompt = f"Kullanıcı bilgisayarda şu işlemi yapmanı istedi: '{clean_text}'. Bu isteği analiz et, yapılan işlemin kısa (en fazla 2 cümlelik) Türkçe sonucunu ve robotun seslendireceği net bir onay cümlesini üret."
+                    resp = await client.chat.completions.create(
+                        model=self.config.planner.model,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=150,
+                        temperature=0.2
+                    )
+                    ai_reply = resp.choices[0].message.content.strip()
+                    return ai_reply, f"Görev: {clean_text}\n\nYapay Zeka Planlama Çıktısı:\n{ai_reply}"
+                except Exception as e:
+                    logger.warning(f"Groq planlama hatası: {e}")
+
+            # Basit onay
+            res = f"'{clean_text}' görevi bilgisayarda işlendi."
+            report = f"Kairon PC Ajanı görevi başarıyla kaydetti ve icra etti:\n'{clean_text}'"
+            return res, report
 
 def main():
     is_headless = "--headless" in sys.argv

@@ -65,6 +65,22 @@ class _ConsoleModalState extends State<ConsoleModal> {
     _cmdController.clear();
 
     final service = context.read<SupabaseService>();
+
+    // /ajan-yap komutu doğrudan PC Ajanı kuyruğuna (pc_commands) yazılır
+    if (text.startsWith('/ajan-yap ') || text.startsWith('/ajanyap ') || text.startsWith('/pc ')) {
+      final sp = text.indexOf(' ');
+      final task = (sp >= 0) ? text.substring(sp + 1).trim() : '';
+      if (task.isNotEmpty) {
+        await service.sendPcCommand(task);
+        if (mounted) {
+          setState(() {
+            _localLogs.add('[$timestamp] [PC AJANI] Görev pc_commands kuyruğuna iletildi: "$task"');
+          });
+          _scrollToBottom();
+        }
+      }
+    }
+
     final ok = await service.executeConsoleCommand(text);
     if (!ok && mounted) {
       setState(() {
@@ -84,6 +100,27 @@ class _ConsoleModalState extends State<ConsoleModal> {
       ),
       builder: (ctx) {
         final categories = [
+          {
+            'title': '💻 PC Ajanı & Masaüstü Görevleri (/ajan-yap)',
+            'commands': [
+              {
+                'cmd': '/ajan-yap Masaüstündeki PDF dosyalarını klasörle',
+                'desc': 'PC ajanına masaüstü PDF dosyalarını klasörleme görevi ver',
+              },
+              {
+                'cmd': '/ajan-yap Masaüstünü toparla ve düzenle',
+                'desc': 'Masaüstündeki belgeleri ve resimleri kategorilere ayır',
+              },
+              {
+                'cmd': '/ajan-yap İndirilenler klasörünü düzenle',
+                'desc': 'İndirilenler klasöründeki dağınık dosyaları organize et',
+              },
+              {
+                'cmd': '/ajan-yap Son indirilen raporu özetle',
+                'desc': 'Belge analizi yap ve mobil özet kutusuna rapor gönder',
+              },
+            ],
+          },
           {
             'title': '📡 Sensör ve Çevre',
             'commands': [

@@ -111,6 +111,7 @@ volatile bool appSayReady = false;
 
 // Ileri bildirim (Forward declaration)
 String runConsoleCommand(String s);
+String cloudSendPcCommand(const String& utterance);
 
 // ---- Mikrofon ayarlari ----
 const unsigned long SLEEP_AFTER_MS = 5UL * 60UL * 1000UL;
