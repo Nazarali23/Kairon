@@ -4,7 +4,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/config.dart';
 import 'core/theme.dart';
+import 'services/auth_service.dart';
 import 'services/supabase_service.dart';
+import 'features/auth/login_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/modes/modes_screen.dart';
 import 'features/telemetry/telemetry_screen.dart';
@@ -31,15 +33,29 @@ class KaironApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => AuthService()),
         ChangeNotifierProvider(create: (_) => SupabaseService()),
       ],
       child: MaterialApp(
         title: 'Kairon Mobile',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
-        home: const MainNavigationShell(),
+        home: const AuthGate(),
       ),
     );
+  }
+}
+
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
+    if (!auth.isAuthenticated) {
+      return const LoginScreen();
+    }
+    return const MainNavigationShell();
   }
 }
 

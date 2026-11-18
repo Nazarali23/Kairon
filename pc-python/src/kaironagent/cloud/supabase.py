@@ -114,6 +114,60 @@ class SupabaseClient:
             logger.warning(f"Heartbeat gönderilemedi: {e}")
             return False
 
+    async def create_pairing_session(self, code: str) -> bool:
+        """PC eşleştirmesi için pairing_sessions tablosuna geçici PIN kaydeder."""
+        payload = {
+            "device_type": "pc",
+            "device_name": self.hostname,
+            "pairing_token": code.upper()
+        }
+        url = "/rest/v1/pairing_sessions"
+        try:
+            async with self._client() as client:
+                resp = await client.post(url, json=payload)
+                return resp.status_code in (200, 201)
+        except Exception as e:
+            logger.warning(f"Eşleşme oturumu oluşturulamadı: {e}")
+            return False
+
+    async def check_pairing_status(self, code: str) -> Optional[str]:
+        """Eşleşme PIN'inin telefon tarafından sahiplenilip sahiplenilmediğini kontrol eder."""
+        url = f"/rest/v1/pairing_sessions?pairing_token=eq.{code.upper()}&select=claimed_by"
+        try:
+            async with self._client() as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data and data[0].get("claimed_by"):
+                        return data[0]["claimed_by"]
+        except Exception as e:
+            logger.warning(f"Eşleşme durumu sorgulanamadı: {e}")
+        return None
+
+    async def get_pc_owner(self) -> Optional[str]:
+        """pc_agent_state tablosundaki mevcut sahip ID'sini döner."""
+        url = "/rest/v1/pc_agent_state?id=eq.1&select=owner_id"
+        try:
+            async with self._client() as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data:
+                        return data[0].get("owner_id")
+        except Exception as e:
+            pass
+        return None
+
+    async def set_pc_owner(self, owner_id: str) -> bool:
+        """pc_agent_state tablosuna kalıcı sahip ID'sini yazar."""
+        url = "/rest/v1/pc_agent_state?id=eq.1"
+        try:
+            async with self._client() as client:
+                resp = await client.patch(url, json={"owner_id": owner_id, "pc_name": self.hostname})
+                return resp.status_code in (200, 204)
+        except Exception as e:
+            return False
+
     async def say(self, text: str) -> bool:
         """
         Kairon robotunun konuşması için robot_state.pending_say alanına yazar.

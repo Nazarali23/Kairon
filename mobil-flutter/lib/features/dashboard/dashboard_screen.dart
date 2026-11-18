@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/supabase_service.dart';
+import '../../services/auth_service.dart';
+import '../pairing/pairing_dialog.dart';
 import '../../core/constants.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -59,11 +61,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.qr_code_scanner, color: Color(0xFF00E5FF)),
+            tooltip: 'Cihaz Eşleştir (Robot & PC)',
+            onPressed: () => PairingDialog.show(context),
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
+            tooltip: 'Yenile',
             onPressed: () {
               service.fetchRobotState();
               service.fetchPcState();
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout, size: 20),
+            tooltip: 'Oturumu Kapat',
+            onPressed: () => context.read<AuthService>().signOut(),
           ),
         ],
       ),

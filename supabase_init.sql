@@ -128,3 +128,48 @@ begin
   alter publication supabase_realtime add table pc_agent_state;
 exception when others then null;
 end $$;
+
+
+-- ====================================================================
+-- 5. CİHAZ SAHİPLİĞİ VE ANLIK EŞLEŞTİRME (DEVICE CLAIMING / PAIRING)
+-- ====================================================================
+
+alter table pc_commands add column if not exists user_id uuid references auth.users(id);
+
+alter table pc_agent_state
+  add column if not exists owner_id uuid references auth.users(id),
+  add column if not exists pairing_token text,
+  add column if not exists pc_name text;
+
+alter table robot_state
+  add column if not exists owner_id uuid references auth.users(id),
+  add column if not exists pairing_token text;
+
+create table if not exists pairing_sessions (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  device_type text not null,            -- 'robot' veya 'pc'
+  device_name text,                     -- 'Nazarali-Laptop' veya 'Kairon-S3'
+  pairing_token text not null unique,   -- 6 haneli PIN veya QR token
+  claimed_by uuid references auth.users(id),
+  claimed_at timestamptz,
+  expires_at timestamptz not null default (now() + interval '15 minutes')
+);
+
+create index if not exists idx_pairing_sessions_token on pairing_sessions (pairing_token);
+
+alter table pairing_sessions enable row level security;
+
+drop policy if exists pairing_sessions_anon on pairing_sessions;
+create policy pairing_sessions_anon on pairing_sessions
+  for all to anon using (true) with check (true);
+
+drop policy if exists pairing_sessions_auth on pairing_sessions;
+create policy pairing_sessions_auth on pairing_sessions
+  for all to authenticated using (true) with check (true);
+
+do $$
+begin
+  alter publication supabase_realtime add table pairing_sessions;
+exception when others then null;
+end $$;

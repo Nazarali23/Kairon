@@ -1,12 +1,14 @@
 /// KaironMobile Supabase Yapılandırması
-/// Gerçek anahtarları buraya ekleyebilir veya yerel ortamdan okuyabilirsiniz.
 class AppConfig {
-  static const String supabaseUrl = 'https://your-project.supabase.co';
-  static const String supabaseAnonKey = 'your-anon-key';
+  static const String supabaseUrl = 'https://qwvkgxyjjbuslzbaervr.supabase.co';
+  static const String supabaseAnonKey =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.'
+      'eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3dmtneHlqamJ1c2x6YmFlcnZyIiwicm9sZSI6Im'
+      'Fub24iLCJpYXQiOjE3OTM2MjY1MTUsImV4cCI6MjEwOTIwMjUxNX0.'
+      'JblAqF00gYoJGDqxHaErj7DRGMOOJTEqyHiJwTbHqgw';
 
   static bool get isConfigured =>
-      supabaseUrl != 'https://your-project.supabase.co' &&
-      supabaseAnonKey != 'your-anon-key' &&
       supabaseUrl.isNotEmpty &&
-      supabaseAnonKey.isNotEmpty;
+      supabaseAnonKey.isNotEmpty &&
+      !supabaseUrl.contains('your-project');
 }

@@ -14,6 +14,7 @@ from .config import load_config, AppConfig
 from .cloud.supabase import SupabaseClient
 from .cloud.models import Command, CommandStatus
 from .security.signing import SigningVerifier
+from .ui.pairing_dialog import PairingHelper
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,6 +27,7 @@ class KaironAgentApp:
     def __init__(self, config: Optional[AppConfig] = None):
         self.config = config or load_config()
         self.running = False
+        self.owner_id: Optional[str] = None
         self.supabase = SupabaseClient(
             supabase_url=self.config.cloud.supabase_url,
             service_role_key=self.config.service_role_key
@@ -44,6 +46,10 @@ class KaironAgentApp:
         logger.info(f"Otomatik Onay Dosya Eşiği: {self.config.security.auto_confirm_max_files}")
         logger.info(f"Planlayıcı Model: {self.config.planner.model}")
         logger.info("=" * 60)
+
+        # Cihaz Eşleştirme ve Sahiplik Doğrulaması (Device Claiming)
+        pairing_helper = PairingHelper(self.supabase)
+        self.owner_id = await pairing_helper.ensure_paired()
 
         # İlk heartbeat
         await self.supabase.heartbeat(online=True, busy=False)
