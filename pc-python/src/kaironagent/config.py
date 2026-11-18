@@ -7,6 +7,7 @@ KaironAgent Yapılandırma ve Sistem Bilgisi Modülü
 
 import os
 import sys
+import re
 import tomllib
 import ctypes
 from pathlib import Path
@@ -159,5 +160,30 @@ def load_config() -> AppConfig:
     cfg.hmac_secret = get_secret("hmac_secret")
     cfg.service_role_key = get_secret("service_role_key")
     cfg.groq_api_key = get_secret("groq_api_key")
+
+    # Supabase URL kontrolü (Keyring / ENV / secrets.h)
+    keyring_url = get_secret("supabase_url")
+    if keyring_url:
+        cfg.cloud.supabase_url = keyring_url
+    elif cfg.cloud.supabase_url == "https://your-project.supabase.co":
+        # sketch_oct30a/secrets.h içinden otomatik algılamayı dene
+        for sp in [Path.cwd() / "sketch_oct30a" / "secrets.h", Path.cwd().parent / "sketch_oct30a" / "secrets.h"]:
+            if sp.exists():
+                try:
+                    content = sp.read_text(encoding="utf-8")
+                    match = re.search(r'#define\s+SUPABASE_URL\s+"([^"]+)"', content)
+                    if match:
+                        cfg.cloud.supabase_url = match.group(1).strip()
+                    if not cfg.groq_api_key:
+                        groq_match = re.search(r'#define\s+GROQ_KEY\s+"([^"]+)"', content)
+                        if groq_match:
+                            cfg.groq_api_key = groq_match.group(1).strip()
+                    if not cfg.hmac_secret:
+                        hmac_match = re.search(r'#define\s+PC_HMAC_KEY\s+"([^"]+)"', content)
+                        if hmac_match:
+                            cfg.hmac_secret = hmac_match.group(1).strip()
+                    break
+                except Exception:
+                    pass
 
     return cfg

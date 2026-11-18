@@ -32,9 +32,10 @@ def main():
     print("  KAIRON AGENT - ANAHTAR VE GİZLİLİK KURULUMU")
     print("=" * 60)
 
-    set_key("hmac_secret", "1. Robot ve PC Arasındaki HMAC Secret (64 karakter hex):")
-    set_key("service_role_key", "2. Supabase Service Role Key (service_role secret):")
-    set_key("groq_api_key", "3. Groq API Key (gsk_...):")
+    set_key("supabase_url", "1. Supabase Project URL (https://<id>.supabase.co):", is_secret=False)
+    set_key("service_role_key", "2. Supabase Service Role Key (service_role secret - RLS aşmak için):", is_secret=True)
+    set_key("hmac_secret", "3. Robot ve PC Arasındaki HMAC Secret (64 karakter hex):", is_secret=True)
+    set_key("groq_api_key", "4. Groq API Key (gsk_...):", is_secret=True)
 
     print("\n[✓] Tüm anahtar kurulumları tamamlandı.")
     print("Artık 'python -m kaironagent' ile ajanı güvenle başlatabilirsiniz.")
