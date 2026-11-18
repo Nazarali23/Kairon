@@ -38,6 +38,16 @@ def detect_screen_scale() -> float:
     except Exception:
         return 1.25  # Yedek varsayılan
 
+def extract_c_define_string(content: str, macro_name: str) -> str:
+    """C/C++ başlık dosyalarındaki tek veya çok satırlı (#define X \\ "...") makrolarını ayıklar."""
+    pattern = rf'#define\s+{macro_name}\b(.*?)(?=\n\s*#define|\Z)'
+    match = re.search(pattern, content, re.DOTALL)
+    if not match:
+        return ""
+    block = match.group(1)
+    parts = re.findall(r'"([^"]*)"', block)
+    return "".join(parts).strip()
+
 def get_secret(name: str, default: str = "") -> str:
     """Önce ortam değişkenine (ENV), yoksa Windows Keyring'e bakar."""
     env_val = os.environ.get(name.upper())
@@ -156,34 +166,43 @@ def load_config() -> AppConfig:
             except Exception as e:
                 print(f"[!] Yapılandırma dosyası okuma hatası ({p}): {e}")
 
-    # Sırları yükle
+    # Sırları yükle (Keyring / ENV)
     cfg.hmac_secret = get_secret("hmac_secret")
-    cfg.service_role_key = get_secret("service_role_key")
+    cfg.service_role_key = get_secret("service_role_key") or get_secret("supabase_key") or get_secret("supabase_secret")
     cfg.groq_api_key = get_secret("groq_api_key")
 
-    # Supabase URL kontrolü (Keyring / ENV / secrets.h)
+    # Supabase URL kontrolü (Keyring / ENV)
     keyring_url = get_secret("supabase_url")
     if keyring_url:
         cfg.cloud.supabase_url = keyring_url
-    elif cfg.cloud.supabase_url == "https://your-project.supabase.co":
-        # sketch_oct30a/secrets.h içinden otomatik algılamayı dene
-        for sp in [Path.cwd() / "sketch_oct30a" / "secrets.h", Path.cwd().parent / "sketch_oct30a" / "secrets.h"]:
-            if sp.exists():
-                try:
-                    content = sp.read_text(encoding="utf-8")
-                    match = re.search(r'#define\s+SUPABASE_URL\s+"([^"]+)"', content)
-                    if match:
-                        cfg.cloud.supabase_url = match.group(1).strip()
-                    if not cfg.groq_api_key:
-                        groq_match = re.search(r'#define\s+GROQ_KEY\s+"([^"]+)"', content)
-                        if groq_match:
-                            cfg.groq_api_key = groq_match.group(1).strip()
-                    if not cfg.hmac_secret:
-                        hmac_match = re.search(r'#define\s+PC_HMAC_KEY\s+"([^"]+)"', content)
-                        if hmac_match:
-                            cfg.hmac_secret = hmac_match.group(1).strip()
-                    break
-                except Exception:
-                    pass
+
+    # sketch_oct30a/secrets.h içinden eksik olanları otomatik tamamla
+    for sp in [Path.cwd() / "sketch_oct30a" / "secrets.h", Path.cwd().parent / "sketch_oct30a" / "secrets.h"]:
+        if sp.exists():
+            try:
+                content = sp.read_text(encoding="utf-8")
+                if cfg.cloud.supabase_url == "https://your-project.supabase.co":
+                    url = extract_c_define_string(content, "SUPABASE_URL")
+                    if url:
+                        cfg.cloud.supabase_url = url
+
+                if not cfg.service_role_key:
+                    # RLS kapalı olduğu için secrets.h içindeki SUPABASE_KEY otomatik kullanılır
+                    supa_k = extract_c_define_string(content, "SUPABASE_KEY")
+                    if supa_k:
+                        cfg.service_role_key = supa_k
+
+                if not cfg.groq_api_key:
+                    groq_k = extract_c_define_string(content, "GROQ_KEY")
+                    if groq_k:
+                        cfg.groq_api_key = groq_k
+
+                if not cfg.hmac_secret:
+                    hmac_k = extract_c_define_string(content, "PC_HMAC_KEY")
+                    if hmac_k:
+                        cfg.hmac_secret = hmac_k
+                break
+            except Exception:
+                pass
 
     return cfg
