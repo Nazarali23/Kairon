@@ -121,6 +121,12 @@ void setup() {
   memInitRAM();
   cloudPullAll();
 
+  if (robotOwnerId.length() == 0) {
+    String pin = robotPairingPin.length() ? robotPairingPin : "849201";
+    pairingScreen.show(pin);
+    Serial.println("[PAIR] Robot henuz bir hesaba bagli degil. Ekranda QR ve PIN gosteriliyor: " + pin);
+  }
+
   Serial.printf("[VEKTOR] Gemini anahtari: %s\n", strlen(GEMINI_KEY) >= 10 ? "var" : "yok (kelime aramasi kullanilacak)");
   Serial.printf("[BULUT] etkin: %s\n", cloudEnabled() ? "evet" : "hayir (URL/anahtar/WiFi?)");
 

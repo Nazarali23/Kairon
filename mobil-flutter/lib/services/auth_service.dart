@@ -34,6 +34,9 @@ class AuthService extends ChangeNotifier {
         password: password,
       );
       _currentUser = res.user;
+      if (_currentUser != null) {
+        _claimOrphanDataSafe(_currentUser!.id);
+      }
       return true;
     } on AuthException catch (e) {
       _errorMessage = e.message;
@@ -58,6 +61,9 @@ class AuthService extends ChangeNotifier {
         password: password,
       );
       _currentUser = res.user;
+      if (_currentUser != null) {
+        _claimOrphanDataSafe(_currentUser!.id);
+      }
       return true;
     } on AuthException catch (e) {
       _errorMessage = e.message;
@@ -118,6 +124,7 @@ class AuthService extends ChangeNotifier {
         await Supabase.instance.client.from('robot_state').update({
           'owner_id': userId,
         }).eq('id', 1);
+        _claimOrphanDataSafe(userId);
       } else if (deviceType == 'pc') {
         await Supabase.instance.client.from('pc_agent_state').update({
           'owner_id': userId,
@@ -134,6 +141,17 @@ class AuthService extends ChangeNotifier {
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  /// Sahipsiz tüm önceki verileri (hafızalar, özel günler, takip) kullanıcıya bağlar
+  Future<void> _claimOrphanDataSafe(String userId) async {
+    try {
+      await Supabase.instance.client.rpc('claim_all_unassigned_data_to_user', params: {
+        'target_user_id': userId,
+      });
+    } catch (e) {
+      debugPrint('Mevcut veri sahiplendirme atlandı: $e');
     }
   }
 }

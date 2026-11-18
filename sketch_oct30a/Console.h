@@ -245,6 +245,21 @@ void handleSerial() {
     printFx();
     return;
   }
+  if (s == "/qr" || s == "/pair") {
+    if (pairingScreen.active) {
+      pairingScreen.leave();
+      Serial.println("[PAIR] QR ekrani kapatildi, yuz geri geldi");
+    } else {
+      String pin = robotPairingPin.length() ? robotPairingPin : "849201";
+      pairingScreen.show(pin);
+      Serial.println("[PAIR] QR ekrani acildi. PIN: " + pin);
+    }
+    return;
+  }
+  if (s == "/owner") {
+    Serial.printf("[PAIR] Sahip Kullanici UUID: %s\n", robotOwnerId.length() ? robotOwnerId.c_str() : "(Henuz eslesmedi)");
+    return;
+  }
   askAndSpeak(s);
 }
 
