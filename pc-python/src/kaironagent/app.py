@@ -1,14 +1,17 @@
 """
-KaironAgent Ana Uygulama Döngüsü (V0 - Temel Bağlantı ve Kalp Atışı)
+KaironAgent Ana Uygulama Döngüsü
+- Modern GUI arayüzü (Tkinter + QR + Canlı Günlük).
 - Supabase ile periyodik heartbeat gönderir (pc_agent_state).
 - pc_commands tablosunu yoklar, komutları doğrular ve durum makinesini işletir.
+- Sistem tepsisi ve masaüstü arayüzü sunar.
 """
 
+import sys
+import signal
 import asyncio
 import logging
-import signal
-import sys
-from typing import Optional
+import threading
+from typing import Optional, Any
 
 from .config import load_config, AppConfig
 from .cloud.supabase import SupabaseClient
@@ -28,6 +31,7 @@ class KaironAgentApp:
         self.config = config or load_config()
         self.running = False
         self.owner_id: Optional[str] = None
+        self.gui: Optional[Any] = None
         self.supabase = SupabaseClient(
             supabase_url=self.config.cloud.supabase_url,
             service_role_key=self.config.service_role_key
@@ -48,11 +52,20 @@ class KaironAgentApp:
         logger.info("=" * 60)
 
         # Cihaz Eşleştirme ve Sahiplik Doğrulaması (Device Claiming)
-        pairing_helper = PairingHelper(self.supabase)
+        def on_pin_generated(pin_code: str):
+            if self.gui:
+                self.gui.update_pairing_state(is_paired=False, pin_code=pin_code)
+
+        pairing_helper = PairingHelper(self.supabase, on_pin_callback=on_pin_generated)
         self.owner_id = await pairing_helper.ensure_paired()
 
+        if self.gui:
+            self.gui.update_pairing_state(is_paired=bool(self.owner_id), owner_id=self.owner_id or "")
+
         # İlk heartbeat
-        await self.supabase.heartbeat(online=True, busy=False)
+        hb_ok = await self.supabase.heartbeat(online=True, busy=False)
+        if self.gui:
+            self.gui.set_online_status(hb_ok)
 
         # Arka plan görevleri
         heartbeat_task = asyncio.create_task(self._heartbeat_loop())
@@ -65,6 +78,8 @@ class KaironAgentApp:
         finally:
             logger.info("Ajan kapatılıyor, durum güncelleniyor...")
             await self.supabase.heartbeat(online=False, busy=False)
+            if self.gui:
+                self.gui.set_online_status(False)
 
     def stop(self):
         self.running = False
@@ -73,9 +88,13 @@ class KaironAgentApp:
         """pc_agent_state tablosuna 15 saniyede bir canlılık bilgisi atar."""
         while self.running:
             try:
-                await self.supabase.heartbeat(online=True, busy=False)
+                ok = await self.supabase.heartbeat(online=True, busy=False)
+                if self.gui:
+                    self.gui.set_online_status(ok)
             except Exception as e:
                 logger.warning(f"Heartbeat hatası: {e}")
+                if self.gui:
+                    self.gui.set_online_status(False)
             await asyncio.sleep(self.config.cloud.heartbeat_s)
 
     async def _poll_loop(self):
@@ -119,7 +138,6 @@ class KaironAgentApp:
         logger.info(f"[+] Güvenlik onayı başarılı: {cmd.id}")
 
         # V0 Aşamasında test amaçlı kabul ve onay
-        # (V1'de gerçek router ve dosya taşıma mantığı çalıştırılacak)
         result_msg = f"Komut başarıyla alındı: {cmd.utterance[:50]}"
         await self.supabase.update_command(
             cmd_id=cmd.id,
@@ -130,26 +148,55 @@ class KaironAgentApp:
         await self.supabase.say("Bilgisayarda komut başarıyla işlendi.")
 
 def main():
+    is_headless = "--headless" in sys.argv
+
     app = KaironAgentApp()
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    if is_headless:
+        # CLI / Konsol Modu
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
-    def shutdown(sig, frame):
-        logger.info(f"Sinyal alındı ({sig}), durduruluyor...")
-        app.stop()
-        for task in asyncio.all_tasks(loop):
-            task.cancel()
+        def shutdown(sig, frame):
+            logger.info(f"Sinyal alındı ({sig}), durduruluyor...")
+            app.stop()
+            for task in asyncio.all_tasks(loop):
+                task.cancel()
 
-    signal.signal(signal.SIGINT, shutdown)
-    signal.signal(signal.SIGTERM, shutdown)
+        signal.signal(signal.SIGINT, shutdown)
+        signal.signal(signal.SIGTERM, shutdown)
 
-    try:
-        loop.run_until_complete(app.start())
-    except KeyboardInterrupt:
-        pass
-    finally:
-        loop.close()
+        try:
+            loop.run_until_complete(app.start())
+        except KeyboardInterrupt:
+            pass
+        finally:
+            loop.close()
+    else:
+        # Görsel Masaüstü Uygulaması (GUI Modu)
+        from .ui.main_window import AgentMainWindow
+
+        gui = AgentMainWindow(app, on_close_callback=app.stop)
+        app.gui = gui
+
+        loop = asyncio.new_event_loop()
+
+        def run_async():
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(app.start())
+            except Exception as e:
+                logger.error(f"Arka plan motor hatası: {e}")
+
+        t = threading.Thread(target=run_async, daemon=True)
+        t.start()
+
+        try:
+            gui.run()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            app.stop()
 
 if __name__ == "__main__":
     main()

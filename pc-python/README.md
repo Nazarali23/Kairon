@@ -1,6 +1,6 @@
 # KaironAgent (PC Ajanı)
 
-ESP32-S3 tabanlı masaüstü robot asistanı **Kairon** için Windows bilgisayar tarafında çalışan otonom yürütme ve otomasyon ajanı.
+ESP32-S3 tabanlı masaüstü robot asistanı **Kairon** için Windows bilgisayar tarafında çalışan otonom yürütme, görev otomasyonu ve görsel masaüstü arayüzü (GUI).
 
 ---
 
@@ -9,100 +9,61 @@ Kairon robotu kullanıcının sesli komutlarını (Groq Whisper STT + Groq LLM) 
 
 ---
 
+## 🖥️ Görsel Masaüstü Uygulama Arayüzü (GUI)
+KaironAgent artık arka planda gizli kalmak yerine masaüstünde modern bir koyu siber arayüz ile açılır:
+1. **Canlı Bağlantı ve Kalp Atışı:** Supabase bağlantısını ve online durumunu yeşil/kırmızı ışıkla anlık gösterir.
+2. **Cihaz Eşleştirme (QR & PIN Kartı):**
+   - Bilgisayar henüz bir kullanıcıya bağlanmadıysa pencerede taranabilir **QR Kod** ve **6 Haneli PIN** gösterilir.
+   - Telefonunuzdan QR taranıp onaylandığında pencere anında yeşil `[✓] Yetkilendirilmiş Hesaba Bağlı` durumuna geçer.
+3. **Canlı Görev ve Olay Günlüğü:**
+   - Robottan veya telefondan gelen görevler, dosya taşıma süreçleri ve kalp atışı hareketleri IDE terminali gibi anlık akar.
+4. **Windows Sistem Tepsisi (System Tray):**
+   - "Tepsiye Küçült" seçeneğiyle görev çubuğuna gizlenir, simgeye tıklandığında anında öne gelir.
+5. **Test Komutu Gönder Butonu:**
+   - Donanım olmadan da sistemin doğru çalıştığını denemek için tek tıkla test görevi tetikler.
+
+---
+
+## 🚀 Başlatma Yöntemleri
+
+### Yöntem 1: Çift Tıklayarak Başlatma
+`pc-python/start_agent.bat` dosyasına çift tıklayarak doğrudan masaüstü uygulamasını açabilirsiniz.
+
+### Yöntem 2: PowerShell / Komut Satırından Başlatma
+```powershell
+cd pc-python
+.\.venv\Scripts\python.exe run_agent.py
+```
+
+*(İsteğe bağlı olarak sadece konsol/servis çıktısı almak isterseniz `python run_agent.py --headless` parametresini kullanabilirsiniz.)*
+
+---
+
 ## 🏛️ Mimari Akış
 
 ```text
-[Kullanıcı (Ses)] ──► [Kairon Robotu (ESP32-S3)]
-                            │
-                            │ 1. STT + Süzgeç + Anahtar Kelime Kapısı
-                            │ 2. LLM [[PC: ...]] etiketi
-                            │ 3. HMAC-SHA256 İmzalı Komut
-                            ▼
-               [Supabase: pc_commands] ◄──── Yoklama (2-8 sn) ────┐
-                            ▲                                     │
-                            │ Durum/Sonuç                         ▼
-                            └──────────────────────── [KaironAgent (Python)]
-                                                         │ (Doğrula -> Planla -> Onayla -> Çalıştır)
-                                                         ▼
-                                            [robot_state.pending_say]
-                                                         │
-                                                         ▼
-                                             [Kairon Sonucu Seslendirir]
+[Kullanıcı (Ses / Mobil)] ──► [Kairon Robotu (ESP32-S3)]
+                                     │
+                                     │ 1. STT + Süzgeç + Niyet Çıkarımı
+                                     │ 2. HMAC-SHA256 İmzalı Komut
+                                     ▼
+                        [Supabase: pc_commands] ◄──── Yoklama (2-8 sn) ────┐
+                                     ▲                                     │
+                                     │ Durum/Sonuç                         ▼
+                                     └──────────────────────── [KaironAgent GUI (Python)]
+                                                                  │ (Doğrula -> Planla -> Çalıştır)
+                                                                  ▼
+                                                     [robot_state.pending_say]
+                                                                  │
+                                                                  ▼
+                                                      [Kairon Sonucu Seslendirir]
 ```
 
 ---
 
-## 🛡️ Güvenlik İlkeleri (Bölüm 13 - Tavizsiz)
-1. **İmzalı Komut Doğrulaması:** Her komut `HMAC-SHA256` ile imzalanır. Robot ve PC arasında paylaşılan 32-baytlık gizli anahtar kullanılır. Replay saldırılarına karşı `nonce` (SQLite) ve 90 saniyelik zaman damgası (`ts`) kontrol edilir.
-2. **Kısıtlı ve İzinli Dizinler (PathGuard):** Yalnızca `Masaüstü`, `İndirilenler` ve `Belgeler` kök dizinlerinde işlem yapılabilir. Sistem, AppData, Program Files, Windows dizinlerine erişim kesinlikle yasaktır. Symlink, Junction (reparse point), UNC ve `..` manipülasyonları engellenir.
-3. **Silme İşlemi Yok (V1):** Hiçbir dosya kalıcı silinmez. Geri alma günlüğü (SQLite Journal) tutulur, taşınan dosyalar eski konumlarına döndürülebilir.
+## 🛡️ Güvenlik İlkeleri (Tavizsiz Güvenlik)
+1. **İmzalı Komut Doğrulaması:** Her komut `HMAC-SHA256` ile imzalanır. Replay saldırılarına karşı `nonce` (SQLite) ve 90 saniyelik zaman damgası (`ts`) kontrol edilir.
+2. **Kısıtlı ve İzinli Dizinler (PathGuard):** Yalnızca `Masaüstü`, `İndirilenler` ve `Belgeler` kök dizinlerinde işlem yapılabilir. Sistem, AppData, Program Files, Windows dizinlerine erişim kesinlikle yasaktır.
+3. **Silme İşlemi Yok:** Hiçbir dosya kalıcı silinmez. Geri alma günlüğü (SQLite Journal) tutulur, taşınan dosyalar eski konumlarına döndürülebilir.
 4. **Çakışma Güvenliği:** Hedef klasörde aynı isimde dosya varsa üzerine yazılmaz; otomatik ` (2)` eki verilir.
-5. **Görsel İmleç Ayrımı (V3):** Fare imleci hareketi sadece görsel eşliktir (koreografi). Dosya taşıma işi asla imleç sürüklemesine emanet edilmez; Python `pathlib`/`shutil` ile güvenli şekilde yapılır. Kullanıcı fareye dokunduğu anda imleç hareketi iptal edilir.
-6. **Güvenli Sır Saklama:** Supabase `service_role` anahtarı ve HMAC sırrı dosyalarda saklanmaz, Windows Kimlik Bilgisi Yöneticisi (**Keyring**) üzerinde tutulur.
-
----
-
-## 📦 Teknoloji Yığını
-- **Python:** 3.12 (64-bit), Windows 10/11
-- **Ağ ve Doğrulama:** `httpx` (AsyncClient), `pydantic v2`, `tenacity`
-- **Güvenlik ve Depolama:** `keyring`, `sqlite3` (stdlib), `tomllib` / `tomli-w`
-- **LLM Entegrasyonu:** Groq SDK (OpenAI uyumlu), Gemini API (yedek)
-- **Windows Entegrasyonu:** `pywin32`, `ctypes`, `uiautomation`, `pynput`
-- **Arayüz:** `pystray` + `Pillow` (Sistem tepsisi), `tkinter` (Onay ve ayar pencereleri)
-
----
-
-## 📂 Dizin Yapısı Planı
-```text
-pc-python/
-├── pyproject.toml
-├── README.md
-├── .gitignore
-├── config.example.toml
-├── src/kaironagent/
-│   ├── __main__.py
-│   ├── app.py
-│   ├── config.py
-│   ├── logging_setup.py
-│   ├── cloud/
-│   │   ├── supabase.py          # REST: fetch, claim, patch, heartbeat, say
-│   │   └── models.py            # Pydantic: Command, Plan, Step, Result
-│   ├── security/
-│   │   ├── signing.py           # HMAC-SHA256, nonce, replay guard
-│   │   ├── policy.py            # İzinli kökler, dosya limitleri, uzantı kuralları
-│   │   └── pathguard.py         # Path traversal, symlink, reparse point denetimi
-│   ├── planner/
-│   │   ├── router.py            # V1: Kural tabanlı Türkçe kalıp yönlendirici
-│   │   ├── llm_planner.py       # V2: Groq araç çağrılı otonom planlayıcı
-│   │   └── naming.py            # Akıllı klasör adı türetme ve sanitization
-│   ├── tools/
-│   │   ├── registry.py          # Araç kayıt defteri
-│   │   ├── files.py             # list, create_folder, move
-│   │   ├── pdfmeta.py           # PDF başlık ve özet okuma (pypdf)
-│   │   ├── docx_summary.py      # Mobil gelen kutusu için dosya özetleme
-│   │   └── speak.py             # robot_state.pending_say köprüsü
-│   ├── executor/
-│   │   ├── runner.py            # Durum makinesi ve görev yürütücü
-│   │   ├── journal.py           # SQLite geri alma günlüğü
-│   │   └── confirm.py           # Masaüstü Tkinter onay penceresi
-│   ├── cursor/
-│   │   ├── uia_desktop.py       # UI Automation masaüstü ikon koordinatları
-│   │   ├── choreography.py      # Kübik Bézier imleç animasyonu
-│   │   └── interrupt.py         # Kullanıcı müdahale algılayıcı
-│   └── ui/
-│       ├── tray.py              # Sistem tepsisi simgesi ve kontrolleri
-│       └── dialogs.py           # Onay ve bildirim diyalogları
-├── tests/
-└── scripts/
-    ├── gen_secret.py            # HMAC anahtarı üretici
-    └── sql/pc_tables.sql        # Supabase DDL tabloları
-```
-
----
-
-## 🚀 Yol Haritası (Aşamalar)
-- **V0 (İskelet & Bağlantı):** Supabase tabloları, `gen_secret.py`, config, keyring, heartbeat döngüsü ve ESP32 `/pc` seri test komutu.
-- **V1 (Kural Tabanlı PDF Düzenleme):** Kural yönlendirici, PathGuard, dosya taşıma, masaüstü onay penceresi, geri alma (undo) ve `pending_say` ile robota geri bildirim.
-- **V2 (LLM Planlayıcı & Dosya Özetleme):** Araç çağrılı LLM (Groq), dinamik klasör adlandırma, İndirilenler klasörünü düzenleme, mobil için `summarize_and_send` desteği.
-- **V3 (İmleç Koreografisi):** UIA ikon tespiti, Bézier eğrisiyle yumuşak imleç hareketi, kullanıcı müdahalesi ile anında kesme.
-- **V4 (İleri Düzey Ajan):** Sesli onay, güvenli uygulama başlatma, medya kontrolleri.
+5. **Dinamik Ekran Ölçeği:** Windows API üzerinden DPI ölçeğini (%100, %125, %150) otomatik tespit eder.

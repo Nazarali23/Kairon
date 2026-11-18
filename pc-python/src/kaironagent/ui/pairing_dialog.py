@@ -1,28 +1,27 @@
 """
-KaironAgent PC Eşleştirme Penceresi (WhatsApp Web / QR Modeli)
-Mobil uygulamadan tek seferlik eşleştirme için 6 haneli kod gösterir ve doğrular.
+KaironAgent PC Eşleştirme Yardımcısı
+Mobil uygulamadan tek seferlik eşleştirme için 6 haneli PIN ve QR oturumu oluşturur ve doğrular.
 """
 
 import random
 import asyncio
 import logging
-import tkinter as tk
-from typing import Optional
+from typing import Optional, Callable
 from ..cloud.supabase import SupabaseClient
-from ..config import get_secret
 
 logger = logging.getLogger("kaironagent.pairing")
 
 class PairingHelper:
-    def __init__(self, supabase: SupabaseClient):
+    def __init__(self, supabase: SupabaseClient, on_pin_callback: Optional[Callable[[str], None]] = None):
         self.supabase = supabase
+        self.on_pin_callback = on_pin_callback
 
     async def ensure_paired(self) -> Optional[str]:
         """PC'nin bir kullanıcı hesabına bağlı olup olmadığını doğrular, bağlı değilse eşleştirme başlatır."""
         # 1. Mevcut sahipliği kontrol et
         owner_id = await self.supabase.get_pc_owner()
         if owner_id:
-            logger.info(f"[✓] PC Ajanı zaten yetkilendirilmiş hesaba bağlı (owner_id: {owner_id[:8]}...)")
+            logger.info(f"[✓] PC Ajanı hesaba bağlı (owner_id: {owner_id[:8]}...)")
             return owner_id
 
         # 2. Yeni 6 haneli rastgele PIN üret
@@ -33,12 +32,15 @@ class PairingHelper:
         logger.info(f"                  [  {pin_code}  ]")
         logger.info("=" * 60)
 
+        if self.on_pin_callback:
+            self.on_pin_callback(pin_code)
+
         # 3. Supabase'e geçici eşleşme oturumu aç
         ok = await self.supabase.create_pairing_session(pin_code)
         if not ok:
             logger.warning("Eşleşme oturumu veritabanına kaydedilemedi.")
 
-        # 4. Arayüzü aç ve onay bekle
+        # 4. Onay bekle
         owner_id = await self._wait_for_pairing(pin_code)
         if owner_id:
             await self.supabase.set_pc_owner(owner_id)
@@ -53,9 +55,8 @@ class PairingHelper:
         return None
 
     async def _wait_for_pairing(self, code: str) -> Optional[str]:
-        """Kullanıcının telefondan kodu girmesini 5 dakika boyunca asenkron olarak bekler."""
-        # Tkinter penceresini arka plan thread'de veya basit pencere olarak gösterebiliriz
-        for _ in range(150):  # 150 * 2sn = 300 saniye (5 dakika)
+        """Kullanıcının telefondan kodu girmesini 15 dakika boyunca asenkron olarak bekler."""
+        for _ in range(450):  # 450 * 2sn = 900 saniye (15 dakika)
             claimed_by = await self.supabase.check_pairing_status(code)
             if claimed_by:
                 return claimed_by
