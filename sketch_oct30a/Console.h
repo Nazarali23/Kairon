@@ -211,6 +211,8 @@ String runConsoleCommand(String s) {
   if (s == "/qr" || s == "/pair") {
     if (pairingScreen.active) {
       pairingScreen.leave();
+      lastL.w = -99; lastR.w = -99; lastColor = 0;
+      setEmotionPose(1, tgtL, tgtR);
       return "QR ekrani kapatildi, robot yuzu geri geldi.";
     } else {
       String pin = robotPairingPin.length() ? robotPairingPin : "849201";
