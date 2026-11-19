@@ -40,6 +40,7 @@ logging.basicConfig(
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("groq").setLevel(logging.WARNING)
 logger = logging.getLogger("kaironagent")
 
 class KaironAgentApp:
