@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../services/supabase_service.dart';
-import '../../models/reminder_model.dart';
 
 class RemindersScreen extends StatefulWidget {
   const RemindersScreen({super.key});
@@ -175,7 +174,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             backgroundColor: ok ? Colors.green : Colors.redAccent,
-                            content: Text(ok ? 'Hatırlatıcı robota iletildi!' : 'Kaydedilemedi.'),
+                            content: Text(ok ? 'Hatırlatıcı robota iletildi!' : 'Kaydedilemedi: ${service.errorMessage ?? "Veritabanı hatası"}'),
                           ),
                         );
                       }

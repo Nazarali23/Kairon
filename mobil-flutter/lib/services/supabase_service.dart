@@ -111,23 +111,22 @@ class SupabaseService extends ChangeNotifier {
     }
   }
 
-  /// Robot Çalışma Modu (0: normal, 1: focus, 2: sleep, 3: guard, 4: care, 5: office)
+  /// Robot Çalışma Modları (Çoklu Mod Bitmask: 64: bayrak, 1: normal, 2: focus, 4: sleep, 8: guard, 16: care, 32: office)
   Future<bool> setModes(List<String> modes) async {
     if (!AppConfig.isConfigured || _robotState == null) return false;
-    int modeInt = 0;
-    if (modes.contains('focus')) {
-      modeInt = 1;
-    } else if (modes.contains('sleep')) {
-      modeInt = 2;
-    } else if (modes.contains('guard')) {
-      modeInt = 3;
-    } else if (modes.contains('care')) {
-      modeInt = 4;
-    } else if (modes.contains('office')) {
-      modeInt = 5;
-    } else {
-      modeInt = 0;
+
+    final cleanModes = modes.toSet();
+    if (cleanModes.isEmpty) {
+      cleanModes.add('normal');
     }
+
+    int modeInt = 64; // Coklu mod bayragi
+    if (cleanModes.contains('normal')) modeInt |= 1;
+    if (cleanModes.contains('focus')) modeInt |= 2;
+    if (cleanModes.contains('sleep')) modeInt |= 4;
+    if (cleanModes.contains('guard')) modeInt |= 8;
+    if (cleanModes.contains('care')) modeInt |= 16;
+    if (cleanModes.contains('office')) modeInt |= 32;
 
     try {
       await Supabase.instance.client.from('robot_state').update({
@@ -139,6 +138,7 @@ class SupabaseService extends ChangeNotifier {
       return true;
     } catch (e) {
       _errorMessage = e.toString();
+      debugPrint('setModes error: $e');
       notifyListeners();
       return false;
     }
@@ -152,6 +152,9 @@ class SupabaseService extends ChangeNotifier {
       currentList.remove(mode);
     } else {
       currentList.add(mode);
+    }
+    if (currentList.isEmpty) {
+      currentList.add('normal');
     }
     return setModes(currentList);
   }
@@ -345,6 +348,7 @@ class SupabaseService extends ChangeNotifier {
 
       final payload = {
         'id': newId,
+        'title': text.trim(),
         'text': text.trim(),
         'due': due.trim(),
         'asked': false,
@@ -353,10 +357,21 @@ class SupabaseService extends ChangeNotifier {
       };
 
       await Supabase.instance.client.from('followups').insert(payload);
+
+      // Robotun yeni hatirlaticiyi hemen algilamasi icin config_version artir
+      if (_robotState != null) {
+        try {
+          await Supabase.instance.client.from('robot_state').update({
+            'config_version': _robotState!.configVersion + 1,
+          }).eq('id', 1);
+        } catch (_) {}
+      }
+
       await fetchReminders();
       return true;
     } catch (e) {
       _errorMessage = e.toString();
+      debugPrint('addReminder error: $e');
       notifyListeners();
       return false;
     }
@@ -381,9 +396,20 @@ class SupabaseService extends ChangeNotifier {
     if (!AppConfig.isConfigured) return false;
     try {
       await Supabase.instance.client.from('followups').delete().eq('id', id);
+
+      if (_robotState != null) {
+        try {
+          await Supabase.instance.client.from('robot_state').update({
+            'config_version': _robotState!.configVersion + 1,
+          }).eq('id', 1);
+        } catch (_) {}
+      }
+
       await fetchReminders();
       return true;
     } catch (e) {
+      _errorMessage = e.toString();
+      notifyListeners();
       return false;
     }
   }

@@ -102,6 +102,41 @@ inline bool isModeActive(const char* m) {
   if (!m || !m[0]) return false;
   return activeModesStr.indexOf(m) >= 0;
 }
+
+inline void updateActiveModesFromInt(int val) {
+  activeModesStr = "";
+  if (val >= 64) {
+    // Coklu Mod Bitmask: 64: bayrak, 1: normal, 2: focus, 4: sleep, 8: guard, 16: care, 32: office
+    if (val & 1) activeModesStr += "normal,";
+    if (val & 2) activeModesStr += "focus,";
+    if (val & 4) activeModesStr += "sleep,";
+    if (val & 8) activeModesStr += "guard,";
+    if (val & 16) activeModesStr += "care,";
+    if (val & 32) activeModesStr += "office,";
+  } else {
+    // Tekil Mod / Legacy
+    switch (val) {
+      case 1: activeModesStr = "focus,"; break;
+      case 2: activeModesStr = "sleep,"; break;
+      case 3: activeModesStr = "guard,"; break;
+      case 4: activeModesStr = "care,"; break;
+      case 5: activeModesStr = "office,"; break;
+      default: activeModesStr = "normal,"; break;
+    }
+  }
+  if (activeModesStr.endsWith(",")) {
+    activeModesStr.remove(activeModesStr.length() - 1);
+  }
+  if (activeModesStr.length() == 0) activeModesStr = "normal";
+
+  // legacy activeMode degiskenini de uyumlu tut
+  if (isModeActive("sleep")) activeMode = 2;
+  else if (isModeActive("focus")) activeMode = 1;
+  else if (isModeActive("guard")) activeMode = 3;
+  else activeMode = 0;
+
+  Serial.printf("[MOD] Aktif modlar guncellendi: %s (int: %d)\n", activeModesStr.c_str(), val);
+}
 int faceStyle = 0;
 String robotOwnerId = "";        // Supabase owner_id (Kullanici UUID)
 String robotPairingPin = "";     // 6 haneli QR / Eslestirme PIN'i

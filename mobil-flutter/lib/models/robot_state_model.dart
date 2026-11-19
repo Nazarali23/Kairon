@@ -65,10 +65,21 @@ class RobotStateModel {
       return 80;
     }
 
-    // active_mode int ya da string gelebilir (0: normal, 1: focus, 2: sleep, 3: guard, 4: care, 5: office)
+    // active_mode int ya da string gelebilir (Coklu Mod bitmask veya legacy int)
     String parseActiveMode(dynamic val) {
       if (val == null) return 'normal';
       if (val is int) {
+        if (val >= 64) {
+          // Bitmask: 64: bayrak, 1: normal, 2: focus, 4: sleep, 8: guard, 16: care, 32: office
+          final active = <String>[];
+          if ((val & 1) != 0) active.add('normal');
+          if ((val & 2) != 0) active.add('focus');
+          if ((val & 4) != 0) active.add('sleep');
+          if ((val & 8) != 0) active.add('guard');
+          if ((val & 16) != 0) active.add('care');
+          if ((val & 32) != 0) active.add('office');
+          return active.isEmpty ? 'normal' : active.join(',');
+        }
         const modes = ['normal', 'focus', 'sleep', 'guard', 'care', 'office'];
         if (val >= 0 && val < modes.length) return modes[val];
         return 'normal';
