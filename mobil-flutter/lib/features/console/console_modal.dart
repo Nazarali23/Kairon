@@ -71,14 +71,29 @@ class _ConsoleModalState extends State<ConsoleModal> {
       final sp = text.indexOf(' ');
       final task = (sp >= 0) ? text.substring(sp + 1).trim() : '';
       if (task.isNotEmpty) {
-        await service.sendPcCommand(task);
+        final pcOk = await service.sendPcCommand(task);
         if (mounted) {
           setState(() {
-            _localLogs.add('[$timestamp] [PC AJANI] Görev pc_commands kuyruğuna iletildi: "$task"');
+            if (pcOk) {
+              _localLogs.add('[$timestamp] [PC AJANI] Görev pc_commands kuyruğuna iletildi: "$task"');
+              _localLogs.add('[$timestamp] [PC AJANI] Masaüstü ajanı görevi devraldı.');
+            } else {
+              _localLogs.add('[$timestamp] [HATA] PC Ajanına görev iletilemedi.');
+            }
+            _isExecuting = false;
+          });
+          _scrollToBottom();
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _localLogs.add('[$timestamp] [UYARI] Kullanım: /ajan-yap <yapılacak görev>');
+            _isExecuting = false;
           });
           _scrollToBottom();
         }
       }
+      return;
     }
 
     final ok = await service.executeConsoleCommand(text);
@@ -88,7 +103,19 @@ class _ConsoleModalState extends State<ConsoleModal> {
         _isExecuting = false;
       });
       _scrollToBottom();
+      return;
     }
+
+    // Donanım yanıtı için 8 saniye zaman aşımı koruması
+    Future.delayed(const Duration(seconds: 8), () {
+      if (mounted && _isExecuting) {
+        setState(() {
+          _isExecuting = false;
+          _localLogs.add('[$timestamp] [ZAMAN AŞIMI] Robottan yanıt alınamadı (Robot çevrimdışı veya meşgul olabilir).');
+        });
+        _scrollToBottom();
+      }
+    });
   }
 
   void _showCommandPalette() {
