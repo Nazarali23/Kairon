@@ -104,6 +104,7 @@ class TelegramConfig:
     enabled: bool = False
     bot_token: str = ""
     chat_id: str = ""
+    proxy: str = ""
 
 @dataclass
 class AppConfig:
@@ -174,6 +175,7 @@ def load_config() -> AppConfig:
                     cfg.telegram.enabled = bool(tg.get("enabled", cfg.telegram.enabled))
                     cfg.telegram.bot_token = tg.get("bot_token", cfg.telegram.bot_token)
                     cfg.telegram.chat_id = tg.get("chat_id", cfg.telegram.chat_id)
+                    cfg.telegram.proxy = tg.get("proxy", cfg.telegram.proxy)
 
                 break
             except Exception as e:

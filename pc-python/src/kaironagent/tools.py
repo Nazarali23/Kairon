@@ -352,18 +352,16 @@ $bmp.Dispose()
         return {"status": "error", "message": f"Ekran goruntusu alma hatasi: {e}"}
 
 
-async def tool_analyze_screen(custom_question: str = "", send_telegram: bool = False, bot_token: str = "", chat_id: str = "") -> Dict[str, Any]:
+async def tool_analyze_screen(custom_question: str = "", send_telegram: bool = False, bot_token: str = "", chat_id: str = "", proxy: str = "") -> Dict[str, Any]:
     """
     Ekran goruntusu alir, Windows Media OCR ile tum metinleri tarar ve yapay zeka ile durumu ozetler.
     Ornek: 'AI IDE'de komut bitti mi?', 'Derleme tamamlandi mi?'
     """
-    temp_img_path = Path(tempfile.gettempdir()) / "kairon_screen_temp.png"
+    temp_img_path = resolve_folder("desktop") / "kairon_screen_temp.png"
     cap_res = tool_capture_screen(save_filename=temp_img_path.name, folder="desktop")
     if not temp_img_path.exists():
-        # Fallback masaustunde olusan dosyayi dene
-        dt_cand = resolve_folder("desktop") / temp_img_path.name
-        if dt_cand.exists():
-            temp_img_path = dt_cand
+        temp_img_path = Path(tempfile.gettempdir()) / "kairon_screen_temp.png"
+        tool_capture_screen(save_filename=temp_img_path.name, folder="desktop")
 
     ocr_text = ""
     if temp_img_path.exists():
@@ -381,7 +379,8 @@ async def tool_analyze_screen(custom_question: str = "", send_telegram: bool = F
             photo_path=str(temp_img_path),
             message=f"Kairon Ekran Goruntusu\nDurum: {custom_question or 'Anlik Ekran'}",
             bot_token=bot_token,
-            chat_id=chat_id
+            chat_id=chat_id,
+            proxy=proxy
         )
         telegram_status = tg_res.get("message", "")
 
@@ -395,7 +394,13 @@ async def tool_analyze_screen(custom_question: str = "", send_telegram: bool = F
     }
 
 
-async def tool_send_telegram(photo_path: Optional[str] = None, message: str = "", bot_token: str = "", chat_id: str = "") -> Dict[str, Any]:
+async def tool_send_telegram(
+    photo_path: Optional[str] = None, 
+    message: str = "", 
+    bot_token: str = "", 
+    chat_id: str = "",
+    proxy: str = ""
+) -> Dict[str, Any]:
     """Telegram uzerinden kullaniciya anlik ucretsiz mesaj veya fotograf gonderir."""
     token = bot_token.strip()
     chat = chat_id.strip()
@@ -406,27 +411,47 @@ async def tool_send_telegram(photo_path: Optional[str] = None, message: str = ""
             "message": "Telegram Bot Token veya Chat ID tanimli degil. (config.toml altinda [telegram] bolumune ekleyebilirsiniz)."
         }
 
+    client_kwargs: Dict[str, Any] = {
+        "timeout": 25.0,
+        "headers": {"User-Agent": "Mozilla/5.0"}
+    }
+    if proxy and proxy.strip():
+        client_kwargs["proxy"] = proxy.strip()
+
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(**client_kwargs) as client:
             if photo_path and Path(photo_path).exists():
                 url = f"https://api.telegram.org/bot{token}/sendPhoto"
                 with open(photo_path, "rb") as f:
                     files = {"photo": f}
-                    data = {"chat_id": chat, "caption": message[:1024]}
+                    data = {"chat_id": chat, "caption": (message or "Kairon Fotoğraf")[:1024]}
                     resp = await client.post(url, data=data, files=files)
-                    if resp.status_code == 200:
-                        return {"status": "ok", "message": "Ekran goruntusu Telegram uzerinden gonderildi."}
-                    else:
-                        return {"status": "error", "message": f"Telegram API hatasi: {resp.text}"}
             else:
                 url = f"https://api.telegram.org/bot{token}/sendMessage"
-                resp = await client.post(url, json={"chat_id": chat, "text": message})
-                if resp.status_code == 200:
-                    return {"status": "ok", "message": "Mesaj Telegram uzerinden iletildi."}
-                else:
-                    return {"status": "error", "message": f"Telegram API hatasi: {resp.text}"}
+                resp = await client.post(url, json={"chat_id": chat, "text": message or "Kairon Bildirimi"})
+
+            if resp.status_code == 200:
+                return {"status": "ok", "message": "Telegram bildirimi basariyla gonderildi."}
+            elif resp.status_code == 502:
+                return {
+                    "status": "error",
+                    "message": "Telegram sunucusu gecici olarak 502 Bad Gateway dondurdu. Telegram DC senkronizasyonu bekleniyor veya gecici bir Telegram sorunu var."
+                }
+            elif resp.status_code == 403:
+                return {
+                    "status": "error",
+                    "message": "Telegram 403: Bot kullanici tarafindan baslatilmamis. Lutfen Telegram uygulamasindan botunuza gidip 'BASLAT' (/start) butonuna basin."
+                }
+            else:
+                return {"status": "error", "message": f"Telegram API hatasi ({resp.status_code}): {resp.text}"}
+    except httpx.TimeoutException:
+        return {
+            "status": "error",
+            "message": "Telegram baglanti zaman asimi: Telegram API sunucusu zamaninda yanit vermedi."
+        }
     except Exception as e:
-        return {"status": "error", "message": f"Telegram iletisim hatasi: {e}"}
+        err_msg = str(e).strip() or type(e).__name__
+        return {"status": "error", "message": f"Telegram iletisim hatasi: {err_msg}"}
 
 
 def tool_organize_files(pattern: str = "pdf", target_folder: str = "PDF_Belgeleri", folder: str = "desktop") -> Dict[str, Any]:
@@ -794,6 +819,7 @@ async def dispatch_tool(name: str, arguments: Dict[str, Any], config: Any = None
     """Gelen fonksiyon cagrisini ilgili araca yonlendirir ve asenkron olarak calistirir."""
     tg_token = getattr(config.telegram, "bot_token", "") if config and hasattr(config, "telegram") else ""
     tg_chat = getattr(config.telegram, "chat_id", "") if config and hasattr(config, "telegram") else ""
+    tg_proxy = getattr(config.telegram, "proxy", "") if config and hasattr(config, "telegram") else ""
 
     if name == "list_files":
         return tool_list_files(
@@ -829,14 +855,16 @@ async def dispatch_tool(name: str, arguments: Dict[str, Any], config: Any = None
             custom_question=arguments.get("custom_question", ""),
             send_telegram=bool(arguments.get("send_telegram", False)),
             bot_token=tg_token,
-            chat_id=tg_chat
+            chat_id=tg_chat,
+            proxy=tg_proxy
         )
     elif name == "send_telegram":
         return await tool_send_telegram(
             message=arguments.get("message", ""),
             photo_path=arguments.get("photo_path"),
             bot_token=tg_token,
-            chat_id=tg_chat
+            chat_id=tg_chat,
+            proxy=tg_proxy
         )
     elif name == "create_folder":
         return tool_create_folder(
