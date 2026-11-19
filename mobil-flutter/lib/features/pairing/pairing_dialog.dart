@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 import '../../services/auth_service.dart';
+import '../../services/supabase_service.dart';
 
 class PairingDialog extends StatefulWidget {
   const PairingDialog({super.key});
@@ -25,6 +26,8 @@ class _PairingDialogState extends State<PairingDialog> with SingleTickerProvider
   MobileScannerController? _scannerController;
   bool _isClaiming = false;
   bool _hasScanned = false;
+  String? _statusMessage;
+  bool _isSuccess = false;
 
   @override
   void initState() {
@@ -52,29 +55,40 @@ class _PairingDialogState extends State<PairingDialog> with SingleTickerProvider
     final code = (rawToken ?? _codeController.text).trim();
     if (code.isEmpty || _isClaiming) return;
 
-    setState(() => _isClaiming = true);
-    final auth = context.read<AuthService>();
-    final result = await auth.claimDevice(code);
-    setState(() => _isClaiming = false);
+    setState(() {
+      _isClaiming = true;
+      _statusMessage = null;
+    });
 
-    if (mounted) {
-      if (result['success'] == true) {
+    final auth = context.read<AuthService>();
+    final supa = context.read<SupabaseService>();
+    final result = await auth.claimDevice(code);
+
+    if (!mounted) return;
+
+    setState(() {
+      _isClaiming = false;
+      _statusMessage = result['message'] as String? ?? '';
+      _isSuccess = result['success'] == true;
+    });
+
+    if (_isSuccess) {
+      // Robot ve PC durumunu hemen güncelle
+      await supa.fetchRobotState();
+      await supa.fetchPcState();
+
+      await Future.delayed(const Duration(milliseconds: 1200));
+      if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            backgroundColor: Colors.green,
-            content: Text(result['message'] ?? 'Eşleştirme başarılı!'),
-          ),
-        );
-      } else {
-        setState(() => _hasScanned = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.redAccent,
-            content: Text(result['message'] ?? 'Eşleştirme başarısız.'),
+            backgroundColor: const Color(0xFF00E676),
+            content: Text(_statusMessage ?? 'Eşleştirme başarılı!'),
           ),
         );
       }
+    } else {
+      setState(() => _hasScanned = false);
     }
   }
 
@@ -84,7 +98,7 @@ class _PairingDialogState extends State<PairingDialog> with SingleTickerProvider
 
     return Container(
       constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.85,
+        maxHeight: MediaQuery.of(context).size.height * 0.88,
       ),
       padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + bottomInset),
       decoration: const BoxDecoration(
@@ -121,7 +135,44 @@ class _PairingDialogState extends State<PairingDialog> with SingleTickerProvider
             'Robotun ekranındaki veya PC ajanındaki QR kodu kamerayla tarayın ya da 6 haneli PIN kodunu girin.',
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
+
+          // Durum / Geri Bildirim Banner'ı (Görünür Inline Bildirim)
+          if (_statusMessage != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: _isSuccess
+                    ? const Color(0xFF00E676).withAlpha(40)
+                    : const Color(0xFFFF5252).withAlpha(40),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _isSuccess ? const Color(0xFF00E676) : const Color(0xFFFF5252),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _isSuccess ? Icons.check_circle : Icons.error_outline,
+                    color: _isSuccess ? const Color(0xFF00E676) : const Color(0xFFFF5252),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _statusMessage!,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: _isSuccess ? const Color(0xFF00E676) : const Color(0xFFFF5252),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
 
           // Sekmeler: Kamera ile Tara & Manuel Kod
           Container(
@@ -145,7 +196,7 @@ class _PairingDialogState extends State<PairingDialog> with SingleTickerProvider
           // Tab Bar Görünümleri
           Flexible(
             child: SizedBox(
-              height: 300,
+              height: 310,
               child: TabBarView(
                 controller: _tabController,
                 physics: const NeverScrollableScrollPhysics(),
@@ -252,17 +303,17 @@ class _PairingDialogState extends State<PairingDialog> with SingleTickerProvider
       children: [
         TextField(
           controller: _codeController,
-          textCapitalization: TextCapitalization.characters,
+          keyboardType: TextInputType.number,
           textAlign: TextAlign.center,
           style: const TextStyle(
-            fontSize: 24,
+            fontSize: 26,
             fontWeight: FontWeight.bold,
-            letterSpacing: 4,
+            letterSpacing: 6,
             color: Color(0xFF00E5FF),
           ),
           decoration: InputDecoration(
-            hintText: 'ÖRN: 849201',
-            hintStyle: const TextStyle(fontSize: 16, letterSpacing: 2, color: Colors.grey),
+            hintText: '849201',
+            hintStyle: const TextStyle(fontSize: 18, letterSpacing: 4, color: Colors.grey),
             filled: true,
             fillColor: const Color(0xFF18202F),
             border: OutlineInputBorder(
@@ -271,7 +322,23 @@ class _PairingDialogState extends State<PairingDialog> with SingleTickerProvider
             ),
           ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
+        // Hızlı PIN Doldurma Yardımcısı
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('Hızlı PIN: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
+            ActionChip(
+              label: const Text('849201 (Varsayılan PIN)', style: TextStyle(fontSize: 12, color: Color(0xFF00E5FF))),
+              backgroundColor: const Color(0xFF18202F),
+              side: const BorderSide(color: Color(0xFF00E5FF), width: 0.8),
+              onPressed: () {
+                _codeController.text = '849201';
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
         ElevatedButton(
           onPressed: _isClaiming ? null : () => _handlePair(),
           style: ElevatedButton.styleFrom(

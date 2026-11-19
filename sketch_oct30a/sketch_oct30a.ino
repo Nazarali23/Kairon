@@ -138,7 +138,7 @@ void setup() {
   micBegin();
   calibrate();
   printFx();
-  xTaskCreatePinnedToCore(cloudTaskLoop, "CloudTask", 12288, NULL, 0, &cloudTask, 0);
+  xTaskCreatePinnedToCore(cloudTaskLoop, "CloudTask", 16384, NULL, 0, &cloudTask, 0);
   Serial.println("Hazir. /kafa evet | /kafa hayir | /kafa asagi | /kafa 45,130,hizli,kal | /style ciddi ...");
 }
 void loop() {

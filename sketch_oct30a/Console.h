@@ -194,7 +194,15 @@ String runConsoleCommand(String s) {
     String resp = applyStyleByName(s.substring(7));
     return "Tarz guncellendi: " + String(STYLE_NAMES[styleMode]) + " (" + resp + ")";
   }
-  if (s.startsWith("/say ")) { speak(s.substring(5)); return "Seslendirildi: " + s.substring(5); }
+  if (s.startsWith("/say ")) {
+    String textToSay = cleanForTTS(s.substring(5));
+    if (textToSay.length() > 0) {
+      strncpy(appSayBuf, textToSay.c_str(), sizeof(appSayBuf) - 1);
+      appSayBuf[sizeof(appSayBuf) - 1] = 0;
+      appSayReady = true;
+    }
+    return "Seslendiriliyor: " + s.substring(5);
+  }
   if (s.startsWith("/vol ")) {
     volume = constrain(s.substring(5).toFloat(), 0.0f, 1.0f);
     printFx();
