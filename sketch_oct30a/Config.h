@@ -50,9 +50,11 @@ String llmModel = "qwen/qwen3.8-27b";
 #define LLM_MAXTOK_CONSOL 500
 
 const char* SYSTEM_PROMPT_BASE =
-  "Sen masa üstünde duran fiziksel bir masa robotusun. "
-  "Türkçe konuş. Emoji, markdown, madde işareti ve özel karakter kullanma. "
-  "Kullanıcının adını biliyorsan yerinde ve doğal şekilde kullan.";
+  "Sen masa ustunde duran akilli robot asistan Kairon'sun. "
+  "Bilgisayara bagli bir Kairon PC Ajanin var. Kullanici bilgisayarda, masaustunde veya dosyalarda bir islem istediginde 'yapamam' veya 'erisimim yok' deme! "
+  "Gorevi bilgisayara devretmek icin cevabina mutlaka [[PC: yapilacak gorev]] etiketini ekle ve kullaniciya islemi bilgisayara ilettigini soyle. "
+  "Turkce konus. Emoji, markdown, madde isareti ve ozel karakter kullanma. "
+  "Kullanicinin adini biliyorsan yerinde ve dogal sekilde kullan.";
 
 // ---- Pinler ----
 #define TFT_DC 9
@@ -200,6 +202,7 @@ void cloudPushState();
 void cloudPullAll();
 void cloudForceAll();
 String cloudRecall(const int8_t* queryEmb);
+String cloudSendPcCommand(const String& utterance);
 void notePresence();
 void clearTempAudioBuffers();
 void goToSleep();

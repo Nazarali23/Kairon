@@ -11,6 +11,8 @@ import signal
 import asyncio
 import logging
 import threading
+import json
+import re
 from pathlib import Path
 from typing import Optional, Any
 
@@ -19,6 +21,17 @@ from .cloud.supabase import SupabaseClient
 from .cloud.models import Command, CommandStatus
 from .security.signing import SigningVerifier
 from .ui.pairing_dialog import PairingHelper
+from .tools import (
+    AGENT_TOOLS,
+    dispatch_tool,
+    tool_list_files,
+    tool_create_file,
+    tool_create_folder,
+    tool_delete_file,
+    tool_organize_files,
+    tool_open_app,
+    resolve_folder
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -164,7 +177,7 @@ class KaironAgentApp:
 
     async def _execute_task(self, utterance: str) -> tuple[str, str]:
         """
-        Gelen komut metnini güvenli otonom kurallar çerçevesinde icra eder.
+        Gelen komut metnini otonom LLM Planlayıcı ve gerçek Windows araçlarıyla icra eder.
         Döndürür: (seslendirilecek_mesaj, detayli_rapor_govdesi)
         """
         clean_text = utterance.strip()
@@ -176,149 +189,144 @@ class KaironAgentApp:
         u_lower = clean_text.lower()
         logger.info(f"[PLANLAYICI] İcra edilecek görev: '{clean_text}'")
 
-        # Masaüstü konumunu tespit et
-        desktop = Path.home() / "Desktop"
-        if not desktop.exists():
-            onedrive_desktop = Path.home() / "OneDrive" / "Desktop"
-            if onedrive_desktop.exists():
-                desktop = onedrive_desktop
+        # 1. Groq LLM + Tool Calling Motoru (Eğer anahtar varsa)
+        if self.config.groq_api_key:
+            try:
+                from groq import AsyncGroq
+                client = AsyncGroq(api_key=self.config.groq_api_key)
 
-        # 1. SENARYO: Belirli Bir Dosyayı Silme / Kaldırma ("1.pdf dosyasını sil", "sil", "kaldır")
-        if any(w in u_lower for w in ["sil", "kaldır", "kaldir", "delete", "remove"]):
-            import re
-            file_match = re.search(r'([\w\-\.]+\.\w+)', clean_text)
-            target_file = None
-            if file_match:
-                fname = file_match.group(1).strip()
-                cand = desktop / fname
-                if cand.exists() and cand.is_file():
-                    target_file = cand
-                else:
-                    for f in desktop.iterdir():
-                        if f.is_file() and f.name.lower() == fname.lower():
-                            target_file = f
-                            break
+                system_prompt = (
+                    "Sen Windows bilgisayar üzerinde otonom çalışan ve Kairon robotuna bağlı Kairon PC Ajanısın.\n"
+                    "Kullanıcının masaüstü, dosyalar, klasörler ve bilgisayar ile ilgili görevlerini yerine getirmek için elindeki ARAÇLARI (tools) KULLAN.\n"
+                    "Önemli Kurallar:\n"
+                    "1. Dosya oluşturma, listeleme, silme, okuma, düzenleme gibi işlemleri MUTLAKA ilgili aracı çağırarak yap.\n"
+                    "2. Asla aracı çağırmadan 'oluşturdum', 'sildim' veya 'dosya var' gibi uydurma cevaplar verme.\n"
+                    "3. Kullanıcı 'kaç tane ... var' veya 'ne var' dediğinde list_files aracını çağırıp sonucu incele.\n"
+                    "4. Robotun seslendirmesi için son cevabın net, kısa ve Türkçe olsun. Markdown madde işareti (*, #, -) ve emoji kullanma."
+                )
 
-            if target_file and target_file.exists():
-                try:
-                    target_file.unlink()
-                    res = f"Masaüstündeki '{target_file.name}' dosyası başarıyla silindi."
-                    report = f"Dosya Silme İşlemi Başarılı:\n- Silinen Dosya: {target_file}\n- Konum: {desktop}"
-                    return res, report
-                except Exception as e:
-                    return f"'{target_file.name}' dosyası silinirken hata oluştu: {e}", str(e)
-            else:
-                return f"Silinmek istenen dosya masaüstünde bulunamadı: '{clean_text}'", f"Masaüstü kontrol edildi, eşleşen dosya bulunamadı."
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": clean_text}
+                ]
 
-        # 2. SENARYO: PDF Dosyalarını Klasörleme
-        elif "pdf" in u_lower and ("klasör" in u_lower or "taşı" in u_lower or "düzenle" in u_lower or "toparla" in u_lower):
-            target_dir = desktop / "PDF_Belgeleri"
-            target_dir.mkdir(exist_ok=True)
+                executed_tools_log = []
 
-            pdf_files = [f for f in desktop.iterdir() if f.is_file() and f.suffix.lower() == ".pdf"]
-            if not pdf_files:
-                return "Masaüstünde taşınacak PDF dosyası bulunamadı.", "Masaüstü tarandı ancak herhangi bir PDF dosyası tespit edilemedi."
-
-            moved = []
-            for f in pdf_files[:self.config.security.max_files_per_command]:
-                dest = target_dir / f.name
-                count = 2
-                while dest.exists():
-                    dest = target_dir / f"{f.stem} ({count}){f.suffix}"
-                    count += 1
-                try:
-                    import shutil
-                    shutil.move(str(f), str(dest))
-                    moved.append(f.name)
-                except Exception as e:
-                    logger.error(f"Dosya taşınamadı ({f.name}): {e}")
-
-            res = f"Masaüstündeki {len(moved)} adet PDF dosyası 'PDF_Belgeleri' klasörüne taşındı."
-            report = f"İşlem Özeti:\n- Kaynak: {desktop}\n- Hedef: {target_dir}\n- Taşınan Dosyalar ({len(moved)}):\n" + "\n".join(f"  • {m}" for m in moved)
-            return res, report
-
-        # 2. SENARYO: Genel Masaüstü Düzenleme / Toparlama
-        elif "düzenle" in u_lower or "toparla" in u_lower or "temizle" in u_lower or "kategorize" in u_lower:
-            categories = {
-                "PDF_Belgeleri": [".pdf"],
-                "Gorseller": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"],
-                "Dokumanlar": [".docx", ".doc", ".txt", ".xlsx", ".xls", ".pptx", ".ppt"],
-                "Arsivler": [".zip", ".rar", ".7z", ".tar", ".gz"]
-            }
-
-            all_files = [f for f in desktop.iterdir() if f.is_file() and not f.name.startswith(".")]
-            moved_count = 0
-            moved_details = []
-
-            for f in all_files[:self.config.security.max_files_per_command]:
-                ext = f.suffix.lower()
-                dest_folder_name = None
-                for cat_name, ext_list in categories.items():
-                    if ext in ext_list:
-                        dest_folder_name = cat_name
-                        break
-
-                if dest_folder_name:
-                    target_dir = desktop / dest_folder_name
-                    target_dir.mkdir(exist_ok=True)
-                    dest = target_dir / f.name
-                    count = 2
-                    while dest.exists():
-                        dest = target_dir / f"{f.stem} ({count}){f.suffix}"
-                        count += 1
-                    try:
-                        import shutil
-                        shutil.move(str(f), str(dest))
-                        moved_count += 1
-                        moved_details.append(f"{f.name} -> {dest_folder_name}")
-                    except Exception as e:
-                        logger.error(f"Dosya taşınamadı ({f.name}): {e}")
-
-            if moved_count == 0:
-                return "Masaüstünde kategorize edilecek serbest dosya bulunamadı.", "Masaüstü kontrol edildi, taşınacak dosya yok."
-
-            res = f"Masaüstündeki {moved_count} dosya kategorilerine ayrılarak düzenlendi."
-            report = f"Masaüstü Düzenleme Raporu:\nToplam {moved_count} dosya düzenlendi:\n" + "\n".join(f"  • {d}" for d in moved_details)
-            return res, report
-
-        # 4. SENARYO: Uygulama Başlatma ("not defterini aç", "hesap makinesini aç")
-        elif any(w in u_lower for w in ["aç", "başlat", "calistir", "çalıştır"]):
-            import subprocess
-            if "not defter" in u_lower or "notepad" in u_lower:
-                subprocess.Popen(["notepad.exe"])
-                return "Not defteri uygulaması açıldı.", "Windows Not Defteri başlatıldı."
-            elif "hesap" in u_lower or "calc" in u_lower:
-                subprocess.Popen(["calc.exe"])
-                return "Hesap makinesi açıldı.", "Windows Hesap Makinesi başlatıldı."
-            elif "tarayıcı" in u_lower or "chrome" in u_lower or "browser" in u_lower:
-                import webbrowser
-                webbrowser.open("https://google.com")
-                return "İnternet tarayıcısı açıldı.", "Varsayılan web tarayıcısı başlatıldı."
-            else:
-                return f"'{clean_text}' işlemi için uygulama başlatılamadı.", "Tanınmayan uygulama açma komutu."
-
-        # 5. SENARYO: Groq LLM Destekli Genel Görev veya Not
-        else:
-            if self.config.groq_api_key:
-                try:
-                    from groq import AsyncGroq
-                    client = AsyncGroq(api_key=self.config.groq_api_key)
-                    prompt = f"Kullanıcı bilgisayarda şu işlemi yapmanı istedi: '{clean_text}'. Bu isteği analiz et, yapılan işlemin kısa (en fazla 2 cümlelik) Türkçe sonucunu ve robotun seslendireceği net bir onay cümlesini üret."
+                # Çok adımlı araç yürütme döngüsü (En fazla 4 adım)
+                for step in range(4):
                     resp = await client.chat.completions.create(
                         model=self.config.planner.model,
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=150,
-                        temperature=0.2
+                        messages=messages,
+                        tools=AGENT_TOOLS,
+                        tool_choice="auto",
+                        max_tokens=300,
+                        temperature=0.1
                     )
-                    ai_reply = resp.choices[0].message.content.strip()
-                    return ai_reply, f"Görev: {clean_text}\n\nYapay Zeka Planlama Çıktısı:\n{ai_reply}"
-                except Exception as e:
-                    logger.warning(f"Groq planlama hatası: {e}")
+                    assistant_msg = resp.choices[0].message
+                    messages.append(assistant_msg)
 
-            # Basit onay
-            res = f"'{clean_text}' görevi bilgisayarda işlendi."
-            report = f"Kairon PC Ajanı görevi başarıyla kaydetti ve icra etti:\n'{clean_text}'"
-            return res, report
+                    if not assistant_msg.tool_calls:
+                        # Araç çağrısı yok, nihai cevap üretildi
+                        final_reply = (assistant_msg.content or "").strip()
+                        # Markdown temizliği (TTS için)
+                        clean_say = re.sub(r'[*#_`~>]', '', final_reply).strip()
+                        clean_say = " ".join(clean_say.split())
+
+                        report_parts = [f"Görev: {clean_text}"]
+                        if executed_tools_log:
+                            report_parts.append("\nYürütülen Sistem Araçları:")
+                            for t_log in executed_tools_log:
+                                report_parts.append(f"  • {t_log}")
+                        report_parts.append(f"\nSonuç:\n{final_reply}")
+
+                        return clean_say, "\n".join(report_parts)
+
+                    # Araç çağrılarını icra et
+                    for tc in assistant_msg.tool_calls:
+                        fn_name = tc.function.name
+                        try:
+                            fn_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                        except Exception:
+                            fn_args = {}
+
+                        logger.info(f"[ARAÇ ÇAĞRISI] {fn_name}({fn_args})")
+                        tool_res = dispatch_tool(fn_name, fn_args)
+                        status_str = tool_res.get("message") or tool_res.get("status") or "Tamamlandı"
+                        logger.info(f"[ARAÇ SONUCU] {fn_name} -> {status_str}")
+
+                        executed_tools_log.append(f"{fn_name}: {status_str}")
+
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": json.dumps(tool_res, ensure_ascii=False)
+                        })
+
+            except Exception as e:
+                logger.warning(f"Groq araç yürütme hatası, yerel kurallara geçiliyor: {e}")
+
+        # 2. Yerel Kural Tabanlı Güvenli İcra (Fallback)
+        # 1) Dosya Listeleme / Sayma (kaç tane, listele, göster)
+        if any(w in u_lower for w in ["kaç", "kac", "say", "listele", "neler var", "ne var"]):
+            ext = "*"
+            if "pdf" in u_lower:
+                ext = ".pdf"
+            elif "txt" in u_lower or "metin" in u_lower:
+                ext = ".txt"
+            elif "resim" in u_lower or "görsel" in u_lower:
+                ext = ".png"
+            res = tool_list_files(folder="desktop", extension=ext)
+            count = res.get("total_count", 0)
+            speech = f"Masaüstünde {count} adet {ext if ext != '*' else ''} dosya bulunuyor."
+            report = f"Masaüstü Dosya Listeleme:\nToplam: {count}\nDosyalar:\n" + "\n".join(f"  • {f}" for f in res.get("files", []))
+            return speech, report
+
+        # 2) Dosya Silme (sil, kaldır)
+        if any(w in u_lower for w in ["sil", "kaldır", "kaldir", "delete", "remove"]):
+            file_match = re.search(r'([\w\-\.]+\.\w+)', clean_text)
+            fname = file_match.group(1).strip() if file_match else ""
+            if not fname:
+                words = clean_text.split()
+                for w in words:
+                    if "." in w and len(w) > 3:
+                        fname = w
+                        break
+            if fname:
+                res = tool_delete_file(filename=fname, folder="desktop")
+                if res.get("status") == "ok":
+                    return f"Masaüstündeki {fname} dosyası başarıyla silindi.", str(res)
+                else:
+                    return f"{fname} dosyası masaüstünde bulunamadı.", str(res)
+
+        # 3) Dosya / Klasör Oluşturma (oluştur, yarat, kaydet)
+        if any(w in u_lower for w in ["oluştur", "olustur", "yarat", "yeni dosya", "metin dosyası", "text dosyası"]):
+            if "klasör" in u_lower or "folder" in u_lower:
+                match = re.search(r'["\']([^"\']+)["\']', clean_text) or re.search(r'(\b\w+\b)\s+(adında|isimli|adli|adlı)', clean_text)
+                fol_name = match.group(1) if match else "Yeni Klasör"
+                res = tool_create_folder(folder_name=fol_name, parent_folder="desktop")
+                return f"Masaüstünde '{fol_name}' klasörü oluşturuldu.", str(res)
+            else:
+                match = re.search(r'["\']([^"\']+)["\']', clean_text) or re.search(r'([\w\-]+)\s+(adında|isimli|adli|adlı)', clean_text)
+                fname = match.group(1) if match else "Kairon-Not"
+                content = ""
+                content_match = re.search(r'içine\s+["\']?([^"\']+)["\']?\s+(yaz|kaydet)', clean_text, re.IGNORECASE)
+                if content_match:
+                    content = content_match.group(1).strip()
+                res = tool_create_file(filename=fname, content=content, folder="desktop")
+                return f"Masaüstünde '{fname}' dosyası oluşturuldu.", str(res)
+
+        # 4) Dosyaları Düzenleme / Toparlama
+        if any(w in u_lower for w in ["düzenle", "duzenle", "toparla", "temizle", "kategorize"]):
+            res = tool_organize_files(pattern="all", folder="desktop")
+            return res.get("message", "Masaüstü düzenlendi."), str(res)
+
+        # 5) Uygulama Başlatma
+        if any(w in u_lower for w in ["not defter", "notepad", "hesap makinesi", "calc", "tarayıcı", "chrome"]):
+            res = tool_open_app(clean_text)
+            return res.get("message", "Uygulama başlatıldı."), str(res)
+
+        # Genel Yedek
+        return f"'{clean_text}' görevi için uygun işlem belirlendi.", f"Görev: {clean_text}"
 
 def main():
     is_headless = "--headless" in sys.argv
