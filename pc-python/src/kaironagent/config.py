@@ -100,12 +100,19 @@ class RobotConfig:
     say_max_chars: int = 250
 
 @dataclass
+class TelegramConfig:
+    enabled: bool = False
+    bot_token: str = ""
+    chat_id: str = ""
+
+@dataclass
 class AppConfig:
     cloud: CloudConfig = field(default_factory=CloudConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     planner: PlannerConfig = field(default_factory=PlannerConfig)
     cursor: CursorConfig = field(default_factory=CursorConfig)
     robot: RobotConfig = field(default_factory=RobotConfig)
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
 
     # Keyring sırları
     hmac_secret: str = ""
@@ -162,6 +169,12 @@ def load_config() -> AppConfig:
                     ro = data["robot"]
                     cfg.robot.say_max_chars = int(ro.get("say_max_chars", cfg.robot.say_max_chars))
 
+                if "telegram" in data:
+                    tg = data["telegram"]
+                    cfg.telegram.enabled = bool(tg.get("enabled", cfg.telegram.enabled))
+                    cfg.telegram.bot_token = tg.get("bot_token", cfg.telegram.bot_token)
+                    cfg.telegram.chat_id = tg.get("chat_id", cfg.telegram.chat_id)
+
                 break
             except Exception as e:
                 print(f"[!] Yapılandırma dosyası okuma hatası ({p}): {e}")
@@ -170,6 +183,10 @@ def load_config() -> AppConfig:
     cfg.hmac_secret = get_secret("hmac_secret")
     cfg.service_role_key = get_secret("service_role_key") or get_secret("supabase_key") or get_secret("supabase_secret")
     cfg.groq_api_key = get_secret("groq_api_key")
+    if not cfg.telegram.bot_token:
+        cfg.telegram.bot_token = get_secret("telegram_bot_token") or get_secret("telegram_token")
+    if not cfg.telegram.chat_id:
+        cfg.telegram.chat_id = get_secret("telegram_chat_id")
 
     # Supabase URL kontrolü (Keyring / ENV)
     keyring_url = get_secret("supabase_url")

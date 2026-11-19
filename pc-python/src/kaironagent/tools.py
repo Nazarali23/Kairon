@@ -2,18 +2,28 @@
 KaironAgent Otonom Araclar (Tools) Modulu
 - Guvenli dosya ve dizin yonetimi (Desktop, Downloads, Documents).
 - Gercek dosya olusturma, listeleme, okuma, silme ve organize etme.
+- Word (.docx) olusturma ve duzenleme (python-docx).
+- Belge donusturme (PDF -> Word/Text, Text -> Word).
+- Ekran goruntusu alma, Windows Media OCR ve durum analizi.
+- Ucretsiz Telegram Bot entegrasyonu (fotograf/mesaj gonderimi).
 - Groq / LLM Tool Calling semalari ve yurutucu fonksiyonlar.
 """
 
 import os
 import re
+import io
 import shutil
+import tempfile
 import subprocess
 import webbrowser
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+import httpx
 import pypdf
+import docx
+import winocr
+from PIL import Image, ImageGrab
 
 # Izinli Guvenli Kok Dizinler
 SAFE_ROOTS = {
@@ -30,13 +40,19 @@ if not SAFE_ROOTS["desktop"].exists():
 
 
 def resolve_folder(folder_key: str = "desktop") -> Path:
-    k = (folder_key or "desktop").strip().lower()
-    if k in ("desktop", "masaüstü", "masaustu"):
+    """Gelen klasor adini temizler ve guvenli kok dizine esler."""
+    if not folder_key:
         return SAFE_ROOTS["desktop"]
-    elif k in ("downloads", "indirilenler", "indirilen"):
+
+    # Gorunmez karakterleri (\u200b-\u200f, \ufeff) ve bosluklari temizle
+    clean = re.sub(r'[\u200b-\u200f\ufeff\s]', '', str(folder_key)).lower()
+
+    if any(w in clean for w in ["down", "indir", "yükle", "yukle"]):
         return SAFE_ROOTS["downloads"]
-    elif k in ("documents", "belgeler", "belgelerim"):
+    elif any(w in clean for w in ["doc", "belge", "doküman", "dokuman"]):
         return SAFE_ROOTS["documents"]
+    elif any(w in clean for w in ["desk", "masa", "masaüstü", "masaustu"]):
+        return SAFE_ROOTS["desktop"]
     return SAFE_ROOTS["desktop"]
 
 
@@ -82,12 +98,14 @@ def tool_list_files(folder: str = "desktop", extension: str = "*") -> Dict[str, 
                 if item.suffix.lower().lstrip(".") == ext:
                     files.append(item.name)
 
+    files_sample = files[:35]
     return {
         "status": "ok",
         "folder": str(target_dir),
         "filter": extension,
         "total_count": len(files),
-        "files": files,
+        "files_sample": files_sample,
+        "note": f"Toplam {len(files)} dosya var. İlk {len(files_sample)} dosya listelendi." if len(files) > 35 else "Tüm dosyalar listelendi.",
         "subfolders_count": len(folders)
     }
 
@@ -97,7 +115,6 @@ def tool_create_file(filename: str, content: str = "", folder: str = "desktop") 
     if not filename:
         return {"status": "error", "message": "Dosya adi belirtilmedi."}
 
-    # Uzanti yoksa varsayilan .txt ekle
     if "." not in filename:
         filename = f"{filename}.txt"
 
@@ -141,7 +158,6 @@ def tool_delete_file(filename: str, folder: str = "desktop") -> Dict[str, Any]:
 
     target_path = resolve_safe_path(folder, filename)
     if not target_path.exists():
-        # Buyuk/kucuk harf duyarsiz arama yap
         parent = target_path.parent
         match = None
         for f in parent.iterdir():
@@ -164,8 +180,8 @@ def tool_delete_file(filename: str, folder: str = "desktop") -> Dict[str, Any]:
         return {"status": "error", "message": f"Dosya silinirken hata olustu: {e}"}
 
 
-def tool_read_file(filename: str, folder: str = "desktop", max_chars: int = 2500) -> Dict[str, Any]:
-    """Metin veya PDF dosyasinin icerigini okur."""
+def tool_read_file(filename: str, folder: str = "desktop", max_chars: int = 3000) -> Dict[str, Any]:
+    """Metin, Word (.docx) veya PDF belgesinin icerigini okur."""
     target_path = resolve_safe_path(folder, filename)
     if not target_path.exists():
         parent = target_path.parent
@@ -182,7 +198,7 @@ def tool_read_file(filename: str, folder: str = "desktop", max_chars: int = 2500
         if ext == ".pdf":
             reader = pypdf.PdfReader(str(target_path))
             text_parts = []
-            for i, page in enumerate(reader.pages[:5]):
+            for i, page in enumerate(reader.pages[:8]):
                 t = page.extract_text()
                 if t:
                     text_parts.append(f"--- Sayfa {i+1} ---\n{t.strip()}")
@@ -194,6 +210,16 @@ def tool_read_file(filename: str, folder: str = "desktop", max_chars: int = 2500
                 "pages_read": len(reader.pages),
                 "content": full_text or "(PDF metin icermiyor veya taranmis resim)"
             }
+        elif ext in (".docx", ".doc"):
+            doc = docx.Document(str(target_path))
+            text_lines = [p.text for p in doc.paragraphs if p.text.strip()]
+            return {
+                "status": "ok",
+                "filename": target_path.name,
+                "type": "docx",
+                "paragraphs_count": len(text_lines),
+                "content": "\n".join(text_lines)[:max_chars]
+            }
         else:
             text = target_path.read_text(encoding="utf-8", errors="ignore")[:max_chars]
             return {
@@ -204,6 +230,203 @@ def tool_read_file(filename: str, folder: str = "desktop", max_chars: int = 2500
             }
     except Exception as e:
         return {"status": "error", "message": f"Dosya okunamadi: {e}"}
+
+
+def tool_create_or_edit_word(filename: str, title: str = "", content: str = "", folder: str = "desktop") -> Dict[str, Any]:
+    """Word (.docx) belgesi olusturur veya mevcut belgeye yeni metin ekler."""
+    if not filename.lower().endswith(".docx"):
+        filename = f"{filename}.docx"
+
+    target_path = resolve_safe_path(folder, filename)
+    try:
+        if target_path.exists():
+            doc = docx.Document(str(target_path))
+        else:
+            doc = docx.Document()
+            if title:
+                doc.add_heading(title, level=0)
+
+        if content:
+            for p in content.split("\n"):
+                clean_p = p.strip()
+                if clean_p.startswith(("# ", "## ")):
+                    doc.add_heading(clean_p.lstrip("# "), level=1)
+                elif clean_p.startswith(("- ", "* ")):
+                    doc.add_paragraph(clean_p.lstrip("-* "), style='List Bullet')
+                elif clean_p:
+                    doc.add_paragraph(clean_p)
+
+        doc.save(str(target_path))
+        return {
+            "status": "ok",
+            "message": f"'{target_path.name}' Word belgesi basariyla olusturuldu / guncellendi.",
+            "path": str(target_path)
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Word belgesi islenirken hata: {e}"}
+
+
+def tool_convert_document(filename: str, target_format: str = "docx", folder: str = "desktop") -> Dict[str, Any]:
+    """PDF, Word ve Metin belgeleri arasinda donusum yapar."""
+    target_path = resolve_safe_path(folder, filename)
+    if not target_path.exists():
+        return {"status": "error", "message": f"Kaynak dosya bulunamadi: {filename}"}
+
+    ext = target_path.suffix.lower()
+    tgt = target_format.lower().lstrip(".")
+    out_name = f"{target_path.stem}.{tgt}"
+    out_path = target_path.parent / out_name
+
+    try:
+        if ext == ".pdf" and tgt in ("docx", "doc"):
+            reader = pypdf.PdfReader(str(target_path))
+            doc = docx.Document()
+            doc.add_heading(f"{target_path.stem} (PDF Donusumu)", level=0)
+            for i, page in enumerate(reader.pages):
+                text = page.extract_text()
+                if text:
+                    doc.add_heading(f"Sayfa {i+1}", level=2)
+                    doc.add_paragraph(text)
+            doc.save(str(out_path))
+            return {"status": "ok", "message": f"PDF basariyla Word belgesine donusturuldu: '{out_path.name}'", "path": str(out_path)}
+
+        elif ext == ".pdf" and tgt == "txt":
+            reader = pypdf.PdfReader(str(target_path))
+            all_text = [p.extract_text() or "" for p in reader.pages]
+            out_path.write_text("\n\n".join(all_text), encoding="utf-8")
+            return {"status": "ok", "message": f"PDF metin dosyasina donusturuldu: '{out_path.name}'", "path": str(out_path)}
+
+        elif ext in (".txt", ".md") and tgt in ("docx", "doc"):
+            content = target_path.read_text(encoding="utf-8", errors="ignore")
+            doc = docx.Document()
+            doc.add_heading(target_path.stem, level=0)
+            for line in content.split("\n"):
+                if line.strip():
+                    doc.add_paragraph(line)
+            doc.save(str(out_path))
+            return {"status": "ok", "message": f"Metin dosyasi Word belgesine donusturuldu: '{out_path.name}'", "path": str(out_path)}
+
+        return {"status": "error", "message": f"{ext} formatindan {tgt} formatina donusum desteklenmiyor."}
+    except Exception as e:
+        return {"status": "error", "message": f"Donusum hatasi: {e}"}
+
+
+def tool_capture_screen(save_filename: str = "Ekran_Goruntusu.png", folder: str = "desktop") -> Dict[str, Any]:
+    """Masaustunun anlik ekran goruntusunu alir ve kaydeder."""
+    target_path = resolve_safe_path(folder, save_filename)
+    try:
+        img = None
+        try:
+            img = ImageGrab.grab(all_screens=True)
+        except Exception:
+            pass
+
+        if img is None:
+            # PowerShell .NET yedek ekran yakalama
+            ps_code = f"""
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+$bmp.Save('{str(target_path)}', [System.Drawing.Imaging.ImageFormat]::Png)
+$g.Dispose()
+$bmp.Dispose()
+"""
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps_code], capture_output=True, timeout=10)
+
+        if img is not None:
+            img.save(str(target_path))
+
+        if target_path.exists() and target_path.stat().st_size > 0:
+            return {
+                "status": "ok",
+                "message": f"Ekran goruntusu basariyla alindi: '{target_path.name}'",
+                "path": str(target_path),
+                "size_bytes": target_path.stat().st_size
+            }
+        else:
+            return {"status": "error", "message": "Ekran yakalanamadi (Goruntu servisi yanit vermedi)."}
+    except Exception as e:
+        return {"status": "error", "message": f"Ekran goruntusu alma hatasi: {e}"}
+
+
+async def tool_analyze_screen(custom_question: str = "", send_telegram: bool = False, bot_token: str = "", chat_id: str = "") -> Dict[str, Any]:
+    """
+    Ekran goruntusu alir, Windows Media OCR ile tum metinleri tarar ve yapay zeka ile durumu ozetler.
+    Ornek: 'AI IDE'de komut bitti mi?', 'Derleme tamamlandi mi?'
+    """
+    temp_img_path = Path(tempfile.gettempdir()) / "kairon_screen_temp.png"
+    cap_res = tool_capture_screen(save_filename=temp_img_path.name, folder="desktop")
+    if not temp_img_path.exists():
+        # Fallback masaustunde olusan dosyayi dene
+        dt_cand = resolve_folder("desktop") / temp_img_path.name
+        if dt_cand.exists():
+            temp_img_path = dt_cand
+
+    ocr_text = ""
+    if temp_img_path.exists():
+        try:
+            img = Image.open(str(temp_img_path))
+            ocr_res = await winocr.recognize_pil(img)
+            ocr_text = ocr_res.text.strip()
+        except Exception as e:
+            ocr_text = f"(OCR calistirilamadi: {e})"
+
+    # Telegram gonderimi istendiyse
+    telegram_status = ""
+    if send_telegram:
+        tg_res = await tool_send_telegram(
+            photo_path=str(temp_img_path),
+            message=f"Kairon Ekran Goruntusu\nDurum: {custom_question or 'Anlik Ekran'}",
+            bot_token=bot_token,
+            chat_id=chat_id
+        )
+        telegram_status = tg_res.get("message", "")
+
+    return {
+        "status": "ok",
+        "question": custom_question,
+        "ocr_text_length": len(ocr_text),
+        "ocr_text": ocr_text[:3500],
+        "image_path": str(temp_img_path),
+        "telegram_status": telegram_status
+    }
+
+
+async def tool_send_telegram(photo_path: Optional[str] = None, message: str = "", bot_token: str = "", chat_id: str = "") -> Dict[str, Any]:
+    """Telegram uzerinden kullaniciya anlik ucretsiz mesaj veya fotograf gonderir."""
+    token = bot_token.strip()
+    chat = chat_id.strip()
+
+    if not token or not chat:
+        return {
+            "status": "info",
+            "message": "Telegram Bot Token veya Chat ID tanimli degil. (config.toml altinda [telegram] bolumune ekleyebilirsiniz)."
+        }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            if photo_path and Path(photo_path).exists():
+                url = f"https://api.telegram.org/bot{token}/sendPhoto"
+                with open(photo_path, "rb") as f:
+                    files = {"photo": f}
+                    data = {"chat_id": chat, "caption": message[:1024]}
+                    resp = await client.post(url, data=data, files=files)
+                    if resp.status_code == 200:
+                        return {"status": "ok", "message": "Ekran goruntusu Telegram uzerinden gonderildi."}
+                    else:
+                        return {"status": "error", "message": f"Telegram API hatasi: {resp.text}"}
+            else:
+                url = f"https://api.telegram.org/bot{token}/sendMessage"
+                resp = await client.post(url, json={"chat_id": chat, "text": message})
+                if resp.status_code == 200:
+                    return {"status": "ok", "message": "Mesaj Telegram uzerinden iletildi."}
+                else:
+                    return {"status": "error", "message": f"Telegram API hatasi: {resp.text}"}
+    except Exception as e:
+        return {"status": "error", "message": f"Telegram iletisim hatasi: {e}"}
 
 
 def tool_organize_files(pattern: str = "pdf", target_folder: str = "PDF_Belgeleri", folder: str = "desktop") -> Dict[str, Any]:
@@ -247,7 +470,6 @@ def tool_organize_files(pattern: str = "pdf", target_folder: str = "PDF_Belgeler
             "details": moved
         }
     else:
-        # Belirli bir uzanti tasima (orn: pdf)
         target_dir = root / target_folder
         target_dir.mkdir(exist_ok=True)
         ext = pat.lstrip(".")
@@ -304,14 +526,13 @@ AGENT_TOOLS = [
         "type": "function",
         "function": {
             "name": "list_files",
-            "description": "Masaustu veya belirtilen klasordeki dosyalari listeler, sayar veya filtreler (orn: kac tane pdf dosyasi var).",
+            "description": "Masaustu, Indirilenler veya Belgeler klasorundeki dosyalari listeler, sayar veya filtreler (orn: kac tane pdf dosyasi var).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "folder": {
                         "type": "string",
-                        "enum": ["desktop", "downloads", "documents"],
-                        "description": "Taranacak klasor (varsayilan: desktop)"
+                        "description": "Taranacak klasor konumu: 'downloads' (indirilenler), 'desktop' (masaüstü) veya 'documents' (belgeler)"
                     },
                     "extension": {
                         "type": "string",
@@ -340,11 +561,125 @@ AGENT_TOOLS = [
                     },
                     "folder": {
                         "type": "string",
-                        "enum": ["desktop", "downloads", "documents"],
-                        "description": "Hedef klasor (varsayilan: desktop)"
+                        "description": "Hedef klasor (varsayilan: desktop, downloads, documents)"
                     }
                 },
                 "required": ["filename"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_or_edit_word",
+            "description": "Microsoft Word (.docx) belgesi olusturur veya mevcut Word belgesine icerik/baslik ekler.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "Word dosya adi (orn: Rapor.docx)"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Belge basligi"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Belge icerik paragraflari veya maddeleri"
+                    },
+                    "folder": {
+                        "type": "string",
+                        "description": "Hedef klasor (desktop, downloads, documents)"
+                    }
+                },
+                "required": ["filename"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "convert_document",
+            "description": "PDF, Word ve Metin belgeleri arasinda donusum yapar (orn: PDF'i Word'e veya Metne cevirir, Metni Word yapar).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "Donusturulecek kaynak dosya adi (orn: tez.pdf)"
+                    },
+                    "target_format": {
+                        "type": "string",
+                        "description": "Hedef format ('docx', 'txt')"
+                    },
+                    "folder": {
+                        "type": "string",
+                        "description": "Dosyanin bulundugu klasor"
+                    }
+                },
+                "required": ["filename", "target_format"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "capture_screen",
+            "description": "Bilgisayar ekraninin anlik ekran goruntusunu alir ve kaydeder.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "save_filename": {
+                        "type": "string",
+                        "description": "Kaydedilecek resim adi (varsayilan: Ekran_Goruntusu.png)"
+                    },
+                    "folder": {
+                        "type": "string",
+                        "description": "Kayit klasoru (desktop, downloads, documents)"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_screen",
+            "description": "Ekrani yakalayip OCR ile metinleri okur ve kullanicinin sorusuna gore IDE, kod veya acik uygulamalarin durumunu analiz eder.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "custom_question": {
+                        "type": "string",
+                        "description": "Kullanicinin analiz istegi (orn: 'IDE'deki derleme bitti mi?', 'Ekrandaki hata nedir?')"
+                    },
+                    "send_telegram": {
+                        "type": "boolean",
+                        "description": "Goruntunun Telegram uzerinden kullaniciya gonderilip gonderilmeyecegi"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_telegram",
+            "description": "Kullaniciya Telegram uzerinden anlik bildirim veya resim gonderir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "Gonderilecek mesaj metni"
+                    },
+                    "photo_path": {
+                        "type": "string",
+                        "description": "Gonderilecek fotografin dosya yolu (opsiyonel)"
+                    }
+                },
+                "required": ["message"]
             }
         }
     },
@@ -362,7 +697,6 @@ AGENT_TOOLS = [
                     },
                     "parent_folder": {
                         "type": "string",
-                        "enum": ["desktop", "downloads", "documents"],
                         "description": "Ust klasor (varsayilan: desktop)"
                     }
                 },
@@ -384,7 +718,6 @@ AGENT_TOOLS = [
                     },
                     "folder": {
                         "type": "string",
-                        "enum": ["desktop", "downloads", "documents"],
                         "description": "Dosyanin bulundugu klasor (varsayilan: desktop)"
                     }
                 },
@@ -396,17 +729,16 @@ AGENT_TOOLS = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Belirtilen metin (.txt, .md, .py) veya PDF belgesinin icerigini okur.",
+            "description": "Belirtilen metin (.txt, .md, .py), Word (.docx) veya PDF belgesinin icerigini okur.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "filename": {
                         "type": "string",
-                        "description": "Okunacak dosya adi (orn: rapor.pdf, not.txt)"
+                        "description": "Okunacak dosya adi (orn: rapor.pdf, not.txt, tez.docx)"
                     },
                     "folder": {
                         "type": "string",
-                        "enum": ["desktop", "downloads", "documents"],
                         "description": "Klasor (varsayilan: desktop)"
                     }
                 },
@@ -424,7 +756,7 @@ AGENT_TOOLS = [
                 "properties": {
                     "pattern": {
                         "type": "string",
-                        "description": "Tasınacak dosya turu (orn: 'pdf' ya da tum masaustunu toplamak icin 'all')"
+                        "description": "Tasinacak dosya turu (orn: 'pdf' ya da tum masaustunu toplamak icin 'all')"
                     },
                     "target_folder": {
                         "type": "string",
@@ -432,7 +764,6 @@ AGENT_TOOLS = [
                     },
                     "folder": {
                         "type": "string",
-                        "enum": ["desktop", "downloads", "documents"],
                         "description": "Klasor konumu"
                     }
                 }
@@ -459,8 +790,11 @@ AGENT_TOOLS = [
 ]
 
 
-def dispatch_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """Gelen fonksiyon cagrisini ilgili araca yonlendirir ve calistirir."""
+async def dispatch_tool(name: str, arguments: Dict[str, Any], config: Any = None) -> Dict[str, Any]:
+    """Gelen fonksiyon cagrisini ilgili araca yonlendirir ve asenkron olarak calistirir."""
+    tg_token = getattr(config.telegram, "bot_token", "") if config and hasattr(config, "telegram") else ""
+    tg_chat = getattr(config.telegram, "chat_id", "") if config and hasattr(config, "telegram") else ""
+
     if name == "list_files":
         return tool_list_files(
             folder=arguments.get("folder", "desktop"),
@@ -471,6 +805,38 @@ def dispatch_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             filename=arguments.get("filename", ""),
             content=arguments.get("content", ""),
             folder=arguments.get("folder", "desktop")
+        )
+    elif name == "create_or_edit_word":
+        return tool_create_or_edit_word(
+            filename=arguments.get("filename", ""),
+            title=arguments.get("title", ""),
+            content=arguments.get("content", ""),
+            folder=arguments.get("folder", "desktop")
+        )
+    elif name == "convert_document":
+        return tool_convert_document(
+            filename=arguments.get("filename", ""),
+            target_format=arguments.get("target_format", "docx"),
+            folder=arguments.get("folder", "desktop")
+        )
+    elif name == "capture_screen":
+        return tool_capture_screen(
+            save_filename=arguments.get("save_filename", "Ekran_Goruntusu.png"),
+            folder=arguments.get("folder", "desktop")
+        )
+    elif name == "analyze_screen":
+        return await tool_analyze_screen(
+            custom_question=arguments.get("custom_question", ""),
+            send_telegram=bool(arguments.get("send_telegram", False)),
+            bot_token=tg_token,
+            chat_id=tg_chat
+        )
+    elif name == "send_telegram":
+        return await tool_send_telegram(
+            message=arguments.get("message", ""),
+            photo_path=arguments.get("photo_path"),
+            bot_token=tg_token,
+            chat_id=tg_chat
         )
     elif name == "create_folder":
         return tool_create_folder(

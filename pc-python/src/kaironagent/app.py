@@ -250,7 +250,7 @@ class KaironAgentApp:
                             fn_args = {}
 
                         logger.info(f"[ARAÇ ÇAĞRISI] {fn_name}({fn_args})")
-                        tool_res = dispatch_tool(fn_name, fn_args)
+                        tool_res = await dispatch_tool(fn_name, fn_args, config=self.config)
                         status_str = tool_res.get("message") or tool_res.get("status") or "Tamamlandı"
                         logger.info(f"[ARAÇ SONUCU] {fn_name} -> {status_str}")
 
@@ -266,22 +266,49 @@ class KaironAgentApp:
                 logger.warning(f"Groq araç yürütme hatası, yerel kurallara geçiliyor: {e}")
 
         # 2. Yerel Kural Tabanlı Güvenli İcra (Fallback)
-        # 1) Dosya Listeleme / Sayma (kaç tane, listele, göster)
-        if any(w in u_lower for w in ["kaç", "kac", "say", "listele", "neler var", "ne var"]):
+        target_fol = "desktop"
+        if any(w in u_lower for w in ["indirilen", "download"]):
+            target_fol = "downloads"
+        elif any(w in u_lower for w in ["belge", "doküman", "dokuman", "document"]):
+            target_fol = "documents"
+
+        # 1) Ekran Görüntüsü / OCR Analizi / Telegram
+        if any(w in u_lower for w in ["ekran", "görüntü", "goruntu", "screenshot", "ss al", "resmini al"]):
+            is_telegram = any(w in u_lower for w in ["telegram", "fotoğraf", "resim olarak"])
+            if any(w in u_lower for w in ["analiz", "durum", "bitti mi", "çalışıyor mu", "ocr", "özet", "ozet"]):
+                res = await dispatch_tool("analyze_screen", {"custom_question": clean_text, "send_telegram": is_telegram}, config=self.config)
+                speech = "Ekran analiz edildi, durum mobil gelen kutunuza iletildi."
+                report = f"Ekran Analizi ve OCR:\n{res.get('ocr_text', '')[:1200]}\n\n{res.get('telegram_status', '')}"
+                return speech, report
+            else:
+                res = await dispatch_tool("capture_screen", {"save_filename": "Ekran_Goruntusu.png", "folder": "desktop"}, config=self.config)
+                if is_telegram and res.get("status") == "ok":
+                    tg_res = await dispatch_tool("send_telegram", {"message": "Ekran görüntüsü", "photo_path": res.get("path")}, config=self.config)
+                    return f"Ekran görüntüsü alındı ve Telegram'a gönderildi.", f"Telegram: {tg_res.get('message')}"
+                return res.get("message", "Ekran görüntüsü masaüstüne kaydedildi."), str(res)
+
+        # 2) Dosya Listeleme / Sayma (kaç tane, listele, göster)
+        if any(w in u_lower for w in ["kaç", "kac", "say", "listele", "neler var", "ne var", "adlarını", "isimlerini"]):
             ext = "*"
             if "pdf" in u_lower:
                 ext = ".pdf"
             elif "txt" in u_lower or "metin" in u_lower:
                 ext = ".txt"
+            elif "word" in u_lower or "docx" in u_lower:
+                ext = ".docx"
             elif "resim" in u_lower or "görsel" in u_lower:
                 ext = ".png"
-            res = tool_list_files(folder="desktop", extension=ext)
+            res = await dispatch_tool("list_files", {"folder": target_fol, "extension": ext}, config=self.config)
             count = res.get("total_count", 0)
-            speech = f"Masaüstünde {count} adet {ext if ext != '*' else ''} dosya bulunuyor."
-            report = f"Masaüstü Dosya Listeleme:\nToplam: {count}\nDosyalar:\n" + "\n".join(f"  • {f}" for f in res.get("files", []))
+            fol_name = "İndirilenler" if target_fol == "downloads" else ("Belgeler" if target_fol == "documents" else "Masaüstü")
+            speech = f"{fol_name} klasöründe {count} adet {ext if ext != '*' else ''} dosya bulunuyor."
+            files_list = res.get("files", [])
+            report = f"{fol_name} Dosya Listesi (Toplam {count}):\n" + "\n".join(f"  • {f}" for f in files_list[:100])
+            if len(files_list) > 100:
+                report += f"\n  ... ve {len(files_list) - 100} dosya daha."
             return speech, report
 
-        # 2) Dosya Silme (sil, kaldır)
+        # 3) Dosya Silme (sil, kaldır)
         if any(w in u_lower for w in ["sil", "kaldır", "kaldir", "delete", "remove"]):
             file_match = re.search(r'([\w\-\.]+\.\w+)', clean_text)
             fname = file_match.group(1).strip() if file_match else ""
@@ -292,19 +319,35 @@ class KaironAgentApp:
                         fname = w
                         break
             if fname:
-                res = tool_delete_file(filename=fname, folder="desktop")
+                res = await dispatch_tool("delete_file", {"filename": fname, "folder": target_fol}, config=self.config)
                 if res.get("status") == "ok":
-                    return f"Masaüstündeki {fname} dosyası başarıyla silindi.", str(res)
+                    return f"{fname} dosyası başarıyla silindi.", str(res)
                 else:
-                    return f"{fname} dosyası masaüstünde bulunamadı.", str(res)
+                    return f"{fname} dosyası bulunamadı.", str(res)
 
-        # 3) Dosya / Klasör Oluşturma (oluştur, yarat, kaydet)
+        # 4) Word Belgesi Oluşturma / Düzenleme
+        if any(w in u_lower for w in ["word", "docx"]):
+            match = re.search(r'["\']([^"\']+)["\']', clean_text) or re.search(r'([\w\-]+)\s+(adında|isimli|adli|adlı)', clean_text)
+            fname = match.group(1) if match else "Kairon_Belge"
+            res = await dispatch_tool("create_or_edit_word", {"filename": fname, "title": fname, "content": clean_text, "folder": target_fol}, config=self.config)
+            return res.get("message", "Word belgesi oluşturuldu."), str(res)
+
+        # 5) Belge Dönüştürme (PDF -> Word, vb.)
+        if any(w in u_lower for w in ["çevir", "cevir", "dönüştür", "donustur"]):
+            file_match = re.search(r'([\w\-\.]+\.\w+)', clean_text)
+            fname = file_match.group(1).strip() if file_match else ""
+            target_fmt = "docx" if "word" in u_lower else "txt"
+            if fname:
+                res = await dispatch_tool("convert_document", {"filename": fname, "target_format": target_fmt, "folder": target_fol}, config=self.config)
+                return res.get("message", "Dönüştürme tamamlandı."), str(res)
+
+        # 6) Dosya / Klasör Oluşturma (oluştur, yarat, kaydet)
         if any(w in u_lower for w in ["oluştur", "olustur", "yarat", "yeni dosya", "metin dosyası", "text dosyası"]):
             if "klasör" in u_lower or "folder" in u_lower:
                 match = re.search(r'["\']([^"\']+)["\']', clean_text) or re.search(r'(\b\w+\b)\s+(adında|isimli|adli|adlı)', clean_text)
                 fol_name = match.group(1) if match else "Yeni Klasör"
-                res = tool_create_folder(folder_name=fol_name, parent_folder="desktop")
-                return f"Masaüstünde '{fol_name}' klasörü oluşturuldu.", str(res)
+                res = await dispatch_tool("create_folder", {"folder_name": fol_name, "parent_folder": target_fol}, config=self.config)
+                return f"'{fol_name}' klasörü oluşturuldu.", str(res)
             else:
                 match = re.search(r'["\']([^"\']+)["\']', clean_text) or re.search(r'([\w\-]+)\s+(adında|isimli|adli|adlı)', clean_text)
                 fname = match.group(1) if match else "Kairon-Not"
@@ -312,17 +355,17 @@ class KaironAgentApp:
                 content_match = re.search(r'içine\s+["\']?([^"\']+)["\']?\s+(yaz|kaydet)', clean_text, re.IGNORECASE)
                 if content_match:
                     content = content_match.group(1).strip()
-                res = tool_create_file(filename=fname, content=content, folder="desktop")
-                return f"Masaüstünde '{fname}' dosyası oluşturuldu.", str(res)
+                res = await dispatch_tool("create_file", {"filename": fname, "content": content, "folder": target_fol}, config=self.config)
+                return f"'{fname}' dosyası oluşturuldu.", str(res)
 
-        # 4) Dosyaları Düzenleme / Toparlama
+        # 7) Dosyaları Düzenleme / Toparlama
         if any(w in u_lower for w in ["düzenle", "duzenle", "toparla", "temizle", "kategorize"]):
-            res = tool_organize_files(pattern="all", folder="desktop")
+            res = await dispatch_tool("organize_files", {"pattern": "all", "folder": target_fol}, config=self.config)
             return res.get("message", "Masaüstü düzenlendi."), str(res)
 
-        # 5) Uygulama Başlatma
+        # 8) Uygulama Başlatma
         if any(w in u_lower for w in ["not defter", "notepad", "hesap makinesi", "calc", "tarayıcı", "chrome"]):
-            res = tool_open_app(clean_text)
+            res = await dispatch_tool("open_application", {"app_name": clean_text}, config=self.config)
             return res.get("message", "Uygulama başlatıldı."), str(res)
 
         # Genel Yedek

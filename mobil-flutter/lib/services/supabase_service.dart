@@ -111,13 +111,27 @@ class SupabaseService extends ChangeNotifier {
     }
   }
 
-  /// Çoklu mod listesini virgülle ayrılmış şekilde kaydeder
+  /// Robot Çalışma Modu (0: normal, 1: focus, 2: sleep, 3: guard, 4: care, 5: office)
   Future<bool> setModes(List<String> modes) async {
     if (!AppConfig.isConfigured || _robotState == null) return false;
-    final modesStr = modes.isEmpty ? 'normal' : modes.join(',');
+    int modeInt = 0;
+    if (modes.contains('focus')) {
+      modeInt = 1;
+    } else if (modes.contains('sleep')) {
+      modeInt = 2;
+    } else if (modes.contains('guard')) {
+      modeInt = 3;
+    } else if (modes.contains('care')) {
+      modeInt = 4;
+    } else if (modes.contains('office')) {
+      modeInt = 5;
+    } else {
+      modeInt = 0;
+    }
+
     try {
       await Supabase.instance.client.from('robot_state').update({
-        'active_mode': modesStr,
+        'active_mode': modeInt,
         'config_version': _robotState!.configVersion + 1,
       }).eq('id', 1);
 
@@ -147,12 +161,16 @@ class SupabaseService extends ChangeNotifier {
     return setModes([newMode]);
   }
 
-  /// Robot Kişilik / Karakter Tarzı Ayarı
+  /// Robot Kişilik / Karakter Tarzı Ayarı (0: komik, 1: ciddi, 2: zeki, 3: soguk, 4: sevimli, 5: otomatik)
   Future<bool> setStyleMode(String style) async {
     if (!AppConfig.isConfigured || _robotState == null) return false;
     try {
+      const styles = ['komik', 'ciddi', 'zeki', 'soguk', 'sevimli', 'otomatik'];
+      final idx = styles.indexOf(style.toLowerCase());
+      final intVal = idx >= 0 ? idx : 5;
+
       await Supabase.instance.client.from('robot_state').update({
-        'style_mode': style,
+        'style_mode': intVal,
         'config_version': _robotState!.configVersion + 1,
       }).eq('id', 1);
 
@@ -264,10 +282,11 @@ class SupabaseService extends ChangeNotifier {
   }
 
   Future<bool> setVolume(int volume) async {
-    if (!AppConfig.isConfigured) return false;
+    if (!AppConfig.isConfigured || _robotState == null) return false;
     try {
       await Supabase.instance.client.from('robot_state').update({
         'volume': volume.clamp(0, 100),
+        'config_version': _robotState!.configVersion + 1,
       }).eq('id', 1);
 
       await fetchRobotState();
@@ -305,7 +324,27 @@ class SupabaseService extends ChangeNotifier {
     if (!AppConfig.isConfigured) return false;
     try {
       final user = Supabase.instance.client.auth.currentUser;
+
+      // PostgreSQL followups tablosunda id auto-increment olmadığı için max id + 1 atanır
+      int newId = 1;
+      try {
+        final maxRow = await Supabase.instance.client
+            .from('followups')
+            .select('id')
+            .order('id', ascending: false)
+            .limit(1)
+            .maybeSingle();
+        if (maxRow != null && maxRow['id'] != null) {
+          newId = (maxRow['id'] as int) + 1;
+        } else {
+          newId = (DateTime.now().millisecondsSinceEpoch ~/ 1000) % 100000;
+        }
+      } catch (_) {
+        newId = (DateTime.now().millisecondsSinceEpoch ~/ 1000) % 100000;
+      }
+
       final payload = {
+        'id': newId,
         'text': text.trim(),
         'due': due.trim(),
         'asked': false,

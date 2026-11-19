@@ -65,6 +65,17 @@ class RobotStateModel {
       return 80;
     }
 
+    // active_mode int ya da string gelebilir (0: normal, 1: focus, 2: sleep, 3: guard, 4: care, 5: office)
+    String parseActiveMode(dynamic val) {
+      if (val == null) return 'normal';
+      if (val is int) {
+        const modes = ['normal', 'focus', 'sleep', 'guard', 'care', 'office'];
+        if (val >= 0 && val < modes.length) return modes[val];
+        return 'normal';
+      }
+      return val.toString();
+    }
+
     return RobotStateModel(
       id: json['id'] as int? ?? 1,
       configVersion: json['config_version'] as int? ?? 0,
@@ -74,7 +85,7 @@ class RobotStateModel {
       ttsPitch: (json['tts_pitch'] as num?)?.toDouble() ?? 1.0,
       robotMix: (json['robot_mix'] as num?)?.toDouble() ?? 0.0,
       styleMode: parseStyle(json['style_mode']),
-      activeMode: json['active_mode']?.toString() ?? 'normal',
+      activeMode: parseActiveMode(json['active_mode']),
       faceStyle: json['face_style']?.toString() ?? 'cute',
       builtinDaysOn: json['builtin_days_on'] as bool? ?? true,
       quietUntilEpoch: json['quiet_until_epoch'] as int? ?? 0,
