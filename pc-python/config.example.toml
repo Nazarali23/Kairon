@@ -1,3 +1,6 @@
+# PC Ajanı için ayrı Groq API anahtarı (Robotun günlük kotasını tüketmemesi için önerilir)
+groq_api_key = ""
+
 [cloud]
 supabase_url = "https://your-project.supabase.co"
 poll_active_s = 3

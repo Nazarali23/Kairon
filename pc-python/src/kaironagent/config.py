@@ -158,6 +158,11 @@ def load_config() -> AppConfig:
                     cfg.planner.model = pl.get("model", cfg.planner.model)
                     cfg.planner.temperature = float(pl.get("temperature", cfg.planner.temperature))
                     cfg.planner.send_pdf_text_to_llm = bool(pl.get("send_pdf_text_to_llm", cfg.planner.send_pdf_text_to_llm))
+                    if "api_key" in pl and pl["api_key"]:
+                        cfg.groq_api_key = str(pl["api_key"]).strip()
+
+                if "groq_api_key" in data and data["groq_api_key"]:
+                    cfg.groq_api_key = str(data["groq_api_key"]).strip()
 
                 if "cursor" in data:
                     cu = data["cursor"]
