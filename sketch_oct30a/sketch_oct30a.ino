@@ -125,6 +125,11 @@ void setup() {
     String pin = robotPairingPin.length() ? robotPairingPin : "849201";
     pairingScreen.show(pin);
     Serial.println("[PAIR] Robot henuz bir hesaba bagli degil. Ekranda QR ve PIN gosteriliyor: " + pin);
+  } else {
+    // Robot zaten bir hesaba bagli: Ekrandaki eski QR ve yazilari tamamen temizle
+    pairingScreen.active = false;
+    tft.fillScreen(C_BLACK);
+    lastL.w = -99; lastR.w = -99; lastColor = 0;
   }
 
   Serial.printf("[VEKTOR] Gemini anahtari: %s\n", strlen(GEMINI_KEY) >= 10 ? "var" : "yok (kelime aramasi kullanilacak)");
