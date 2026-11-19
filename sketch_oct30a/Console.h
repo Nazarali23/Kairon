@@ -222,9 +222,13 @@ String runConsoleCommand(String s) {
     return robotOwnerId.length() ? ("Sahip Kullanici UUID: " + robotOwnerId) : "Robot henuz bir hesaba baglanmadi.";
   }
 
-  // Varsayilan: Soru olarak yapay zekaya ilet ve seslendir
-  askAndSpeak(s);
-  return "Soru yapay zekaya iletildi: " + s;
+  // Varsayilan: Soru olarak yapay zekaya ilet
+  // NOT: Bu fonksiyon CloudTask'tan (16KB yigin) cagirilabilir.
+  // askAndSpeak() ise TTS (minimp3 ~30KB yigin) gerektirdiginden
+  // CloudTask'ta stack-overflow yapabilir. Bu yuzden soruyu
+  // appSayBuf uzerinden ana loop'a devrediyoruz.
+  // Seri porttan gelen komutlar handleSerial() uzerinden 32KB yiginla calisir, sorun yok.
+  return "Bilinmeyen komut: " + s;
 }
 
 // ================= SERIAL PORT YOKLAMA =================
@@ -233,6 +237,14 @@ void handleSerial() {
   String s = Serial.readStringUntil('\n');
   s.trim();
   if (!s.length()) return;
+
+  // Seri portta / ile baslamayan metin dogrudan yapay zekaya sorulur (32KB loop yigini, guvenli)
+  if (!s.startsWith("/")) {
+    askAndSpeak(s);
+    Serial.printf("[KONSOL] Soru yapay zekaya iletildi: %s\n", s.c_str());
+    return;
+  }
+
   String result = runConsoleCommand(s);
   if (result.length()) {
     Serial.printf("[KONSOL] %s\n", result.c_str());

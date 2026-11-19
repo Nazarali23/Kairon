@@ -67,9 +67,9 @@ def get_secret(name: str, default: str = "") -> str:
 @dataclass
 class CloudConfig:
     supabase_url: str = "https://your-project.supabase.co"
-    poll_active_s: float = 2.0
-    poll_idle_s: float = 8.0
-    heartbeat_s: float = 15.0
+    poll_active_s: float = 3.0
+    poll_idle_s: float = 10.0
+    heartbeat_s: float = 25.0
 
 @dataclass
 class SecurityConfig:
@@ -83,7 +83,7 @@ class SecurityConfig:
 @dataclass
 class PlannerConfig:
     provider: str = "groq"
-    model: str = "qwen-2.5-32b"  # Kullanıcı isteği: Groq Qwen
+    model: str = "qwen/qwen3.8-27b"  # Robot firmware ile aynı çalışan Groq modeli
     temperature: float = 0.0
     send_pdf_text_to_llm: bool = false if False else False
 

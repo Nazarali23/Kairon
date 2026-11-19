@@ -138,7 +138,7 @@ void setup() {
   micBegin();
   calibrate();
   printFx();
-  xTaskCreatePinnedToCore(cloudTaskLoop, "CloudTask", 16384, NULL, 0, &cloudTask, 0);
+  xTaskCreatePinnedToCore(cloudTaskLoop, "CloudTask", 16384, NULL, 1, &cloudTask, 0);
   Serial.println("Hazir. /kafa evet | /kafa hayir | /kafa asagi | /kafa 45,130,hizli,kal | /style ciddi ...");
 }
 void loop() {
@@ -169,17 +169,6 @@ void loop() {
     appSayReady = false;
     speak(say);
   }
-#if USE_PIR
-  // Kenar algilama: PIR dusuk->yuksek gecisinde tetikle (surekli HIGH lastPresenceMs'i surekli sifirlamasın)
-  static bool pirWasHigh = false;
-  bool pirNow = (digitalRead(PIR_PIN) == HIGH);
-  if (pirNow && !pirWasHigh) { 
-    lastActivity = millis(); 
-    notePresence(); 
-    Serial.println("[PIR] Hareket algilandi");
-  }
-  pirWasHigh = pirNow;
-#endif
 
   if (state != IDLE) lastActivity = millis();
 

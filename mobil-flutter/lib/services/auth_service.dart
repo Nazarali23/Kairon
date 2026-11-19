@@ -34,9 +34,6 @@ class AuthService extends ChangeNotifier {
         password: password,
       );
       _currentUser = res.user;
-      if (_currentUser != null) {
-        _claimOrphanDataSafe(_currentUser!.id);
-      }
       return true;
     } on AuthException catch (e) {
       _errorMessage = e.message;
@@ -64,9 +61,6 @@ class AuthService extends ChangeNotifier {
             : null,
       );
       _currentUser = res.user;
-      if (_currentUser != null) {
-        _claimOrphanDataSafe(_currentUser!.id);
-      }
       return true;
     } on AuthException catch (e) {
       _errorMessage = e.message;
@@ -146,7 +140,7 @@ class AuthService extends ChangeNotifier {
         };
       }
 
-      // 2. robot_state tablosundaki pairing_token veya doğrudan robot eşleşmesi
+      // 2. robot_state tablosundaki pairing_token ile robot eşleşmesi
       final robotRow = await Supabase.instance.client
           .from('robot_state')
           .select()
@@ -154,9 +148,20 @@ class AuthService extends ChangeNotifier {
           .maybeSingle();
 
       if (robotRow != null) {
+        final existingOwner = robotRow['owner_id'] as String?;
+        // Robot zaten başka bir kullanıcıya aitse eşleşmeye izin verme
+        if (existingOwner != null && existingOwner.isNotEmpty && existingOwner != userId) {
+          return {
+            'success': false,
+            'message': 'Bu robot zaten başka bir kullanıcıya bağlı. Eşleştirmek için robotu sıfırlayın (/wipe).'
+          };
+        }
+
         final robotPin = (robotRow['pairing_token'] as String?)?.trim();
-        // Eğer PIN eşleşiyorsa veya PIN 849201 ise veya robot_state sahipsizse
-        if ((robotPin != null && robotPin == token) || token == "849201" || robotRow['owner_id'] == null) {
+        // PIN doğrulaması: Sadece girilen PIN eşleşiyorsa (veya varsayılan 849201 ise) bağla
+        final isPinMatch = (robotPin != null && robotPin.isNotEmpty && robotPin == token) || token == "849201";
+
+        if (isPinMatch) {
           await Supabase.instance.client.from('robot_state').update({
             'owner_id': userId,
             'pairing_token': null,
