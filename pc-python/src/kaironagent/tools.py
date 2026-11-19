@@ -395,13 +395,14 @@ async def tool_analyze_screen(custom_question: str = "", send_telegram: bool = F
 
 
 async def tool_send_telegram(
+    file_path: Optional[str] = None,
     photo_path: Optional[str] = None, 
     message: str = "", 
     bot_token: str = "", 
     chat_id: str = "",
     proxy: str = ""
 ) -> Dict[str, Any]:
-    """Telegram uzerinden kullaniciya anlik ucretsiz mesaj veya fotograf gonderir."""
+    """Telegram uzerinden kullaniciya anlik ucretsiz mesaj, dosya (PDF, Word, TXT vb.) veya fotograf gonderir."""
     token = bot_token.strip()
     chat = chat_id.strip()
 
@@ -411,8 +412,27 @@ async def tool_send_telegram(
             "message": "Telegram Bot Token veya Chat ID tanimli degil. (config.toml altinda [telegram] bolumune ekleyebilirsiniz)."
         }
 
+    # Hedef dosya tespiti (file_path veya photo_path)
+    target_path = None
+    candidate = file_path or photo_path
+    if candidate:
+        p = Path(candidate)
+        if p.exists() and p.is_file():
+            target_path = p
+        else:
+            c_name = p.name.lower()
+            for r in SAFE_ROOTS.values():
+                if not r.exists():
+                    continue
+                for f in r.iterdir():
+                    if f.is_file() and f.name.lower() == c_name:
+                        target_path = f
+                        break
+                if target_path:
+                    break
+
     client_kwargs: Dict[str, Any] = {
-        "timeout": 25.0,
+        "timeout": 30.0,
         "headers": {"User-Agent": "Mozilla/5.0"}
     }
     if proxy and proxy.strip():
@@ -420,12 +440,26 @@ async def tool_send_telegram(
 
     try:
         async with httpx.AsyncClient(**client_kwargs) as client:
-            if photo_path and Path(photo_path).exists():
-                url = f"https://api.telegram.org/bot{token}/sendPhoto"
-                with open(photo_path, "rb") as f:
-                    files = {"photo": f}
-                    data = {"chat_id": chat, "caption": (message or "Kairon Fotoğraf")[:1024]}
-                    resp = await client.post(url, data=data, files=files)
+            if target_path and target_path.exists():
+                ext = target_path.suffix.lower()
+                caption_text = (message or f"{target_path.name}")[:1024]
+
+                if ext in [".png", ".jpg", ".jpeg"] and (photo_path or "foto" in (message or "").lower()):
+                    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+                    with open(target_path, "rb") as f:
+                        files = {"photo": (target_path.name, f)}
+                        data = {"chat_id": chat, "caption": caption_text}
+                        resp = await client.post(url, data=data, files=files)
+                else:
+                    # PDF, Word (.docx), TXT, vb. belgeleri dosya (sendDocument) olarak gonder
+                    url = f"https://api.telegram.org/bot{token}/sendDocument"
+                    with open(target_path, "rb") as f:
+                        files = {"document": (target_path.name, f)}
+                        data = {"chat_id": chat, "caption": caption_text}
+                        resp = await client.post(url, data=data, files=files)
+
+                if resp.status_code == 200:
+                    return {"status": "ok", "message": f"'{target_path.name}' dosyası Telegram üzerinden başarıyla gönderildi."}
             else:
                 url = f"https://api.telegram.org/bot{token}/sendMessage"
                 resp = await client.post(url, json={"chat_id": chat, "text": message or "Kairon Bildirimi"})
@@ -691,17 +725,17 @@ AGENT_TOOLS = [
         "type": "function",
         "function": {
             "name": "send_telegram",
-            "description": "Kullaniciya Telegram uzerinden anlik bildirim veya resim gonderir.",
+            "description": "Kullaniciya Telegram uzerinden anlik bildirim, dosya (PDF, Word, TXT vb.) veya fotograf gonderir.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "message": {
                         "type": "string",
-                        "description": "Gonderilecek mesaj metni"
+                        "description": "Gonderilecek mesaj metni veya dosya aciklamasi (caption)"
                     },
-                    "photo_path": {
+                    "file_path": {
                         "type": "string",
-                        "description": "Gonderilecek fotografin dosya yolu (opsiyonel)"
+                        "description": "Telegram ile kullaniciya gonderilecek dosyanin tam yolu veya adi (orn: rapor.pdf, tez.docx, ekran.png)"
                     }
                 },
                 "required": ["message"]
@@ -861,6 +895,7 @@ async def dispatch_tool(name: str, arguments: Dict[str, Any], config: Any = None
     elif name == "send_telegram":
         return await tool_send_telegram(
             message=arguments.get("message", ""),
+            file_path=arguments.get("file_path") or arguments.get("photo_path") or arguments.get("document_path"),
             photo_path=arguments.get("photo_path"),
             bot_token=tg_token,
             chat_id=tg_chat,

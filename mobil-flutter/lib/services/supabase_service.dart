@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/robot_state_model.dart';
 import '../models/reminder_model.dart';
+import '../models/inbox_item_model.dart';
 import '../core/config.dart';
 
 class SupabaseService extends ChangeNotifier {
@@ -15,6 +16,9 @@ class SupabaseService extends ChangeNotifier {
   List<ReminderModel> _reminders = [];
   bool _isRemindersLoading = false;
 
+  List<InboxItemModel> _inboxItems = [];
+  bool _isInboxLoading = false;
+
   RobotStateModel? get robotState => _robotState;
   bool get isPcOnline => _isPcOnline;
   bool get isLoading => _isLoading;
@@ -22,6 +26,9 @@ class SupabaseService extends ChangeNotifier {
 
   List<ReminderModel> get reminders => _reminders;
   bool get isRemindersLoading => _isRemindersLoading;
+
+  List<InboxItemModel> get inboxItems => _inboxItems;
+  bool get isInboxLoading => _isInboxLoading;
 
   SupabaseService() {
     init();
@@ -41,6 +48,7 @@ class SupabaseService extends ChangeNotifier {
       await fetchRobotState();
       await fetchPcState();
       await fetchReminders();
+      await fetchInbox();
 
       // Periyodik kontrol (10 saniye)
       _pollingTimer?.cancel();
@@ -410,6 +418,67 @@ class SupabaseService extends ChangeNotifier {
     } catch (e) {
       _errorMessage = e.toString();
       notifyListeners();
+      return false;
+    }
+  }
+
+  /// Siber Ofis & PC Ajanı Raporları / Özetleri (app_inbox)
+  Future<void> fetchInbox() async {
+    if (!AppConfig.isConfigured) return;
+    _isInboxLoading = true;
+    notifyListeners();
+
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      var query = Supabase.instance.client.from('app_inbox').select();
+      if (user != null) {
+        query = query.or('user_id.eq.${user.id},user_id.is.null');
+      }
+
+      final res = await query.order('created_at', ascending: false).limit(30);
+      _inboxItems = (res as List).map((row) => InboxItemModel.fromJson(row)).toList();
+    } catch (e) {
+      debugPrint('fetchInbox error: $e');
+    } finally {
+      _isInboxLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> deleteInboxItem(String id) async {
+    if (!AppConfig.isConfigured) return false;
+    try {
+      await Supabase.instance.client.from('app_inbox').delete().eq('id', id);
+      _inboxItems.removeWhere((item) => item.id == id);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('deleteInboxItem error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> markInboxItemAsRead(String id) async {
+    if (!AppConfig.isConfigured) return false;
+    try {
+      await Supabase.instance.client.from('app_inbox').update({'is_read': true}).eq('id', id);
+      final idx = _inboxItems.indexWhere((item) => item.id == id);
+      if (idx != -1) {
+        _inboxItems[idx] = InboxItemModel(
+          id: _inboxItems[idx].id,
+          title: _inboxItems[idx].title,
+          body: _inboxItems[idx].body,
+          source: _inboxItems[idx].source,
+          kind: _inboxItems[idx].kind,
+          filePath: _inboxItems[idx].filePath,
+          isRead: true,
+          createdAt: _inboxItems[idx].createdAt,
+          userId: _inboxItems[idx].userId,
+        );
+        notifyListeners();
+      }
+      return true;
+    } catch (e) {
       return false;
     }
   }

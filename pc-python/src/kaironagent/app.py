@@ -170,8 +170,14 @@ class KaironAgentApp:
 
         # 6. Mobil Uygulamaya Özet Raporu Gönder (app_inbox)
         owner_id = self.owner_id
+        task_title = (utterance or "").strip()
+        for pfix in ["/ajan-yap", "/ajanyap", "/pc", "ajan yap", "ajan:"]:
+            if task_title.lower().startswith(pfix):
+                task_title = task_title[len(pfix):].strip()
+        inbox_title = f"Özet: {task_title[:45]}" if task_title else "PC Ajanı Raporu"
+
         await self.supabase.send_inbox_summary(
-            title="PC Ajanı Görevi Tamamladı",
+            title=inbox_title,
             body=summary_body or result_msg,
             user_id=owner_id
         )
@@ -202,8 +208,9 @@ class KaironAgentApp:
                     "Önemli Kurallar:\n"
                     "1. Dosya oluşturma, listeleme, silme, okuma, düzenleme gibi işlemleri MUTLAKA ilgili aracı çağırarak yap.\n"
                     "2. Asla aracı çağırmadan 'oluşturdum', 'sildim' veya 'dosya var' gibi uydurma cevaplar verme.\n"
-                    "3. Kullanıcı 'kaç tane ... var' veya 'ne var' dediğinde list_files aracını çağırıp sonucu incele.\n"
-                    "4. Robotun seslendirmesi için son cevabın net, kısa ve Türkçe olsun. Markdown madde işareti (*, #, -) ve emoji kullanma."
+                    "3. Kullanıcı bir dosyayı (PDF, Word, metin belgesi, resim) 'gönder', 'telegrama at' veya 'telefona ilet' dediğinde 'send_telegram' aracını file_path parametresi ile çağırarak dosyayı kullanıcının Telegram'ına doğrudan ilet.\n"
+                    "4. Kullanıcı bir belgenin özetini, ekran analizini veya dosya içeriklerini sorduğunda sonucu detaylı ve net bir metin özeti olarak hazırla. Bu özetler otomatik olarak kullanıcının mobil uygulamasındaki 'Gelen Kutusu & Özetler' ekranına iletilir.\n"
+                    "5. Robotun seslendirmesi için son cevabın net, kısa ve Türkçe olsun. Markdown madde işareti (*, #, -) ve emoji kullanma."
                 )
 
                 messages = [
